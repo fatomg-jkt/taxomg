@@ -228,7 +228,7 @@ function useTaxDatabase() {
 
   useEffect(() => {
     try {
-      const saved = window.localStorage.getItem(storageKey);
+      const saved = typeof window === "undefined" ? null : window.localStorage.getItem(storageKey);
       setData(saved ? ({ ...cloneSeed(), ...JSON.parse(saved) } as TaxDatabase) : cloneSeed());
     } catch {
       setError("Local data could not be loaded. Seed data is shown instead.");
@@ -239,7 +239,7 @@ function useTaxDatabase() {
   }, []);
 
   useEffect(() => {
-    if (!loading) window.localStorage.setItem(storageKey, JSON.stringify(data));
+    if (!loading && typeof window !== "undefined") window.localStorage.setItem(storageKey, JSON.stringify(data));
   }, [data, loading]);
 
   function upsertRecord<K extends ModuleKey>(key: K, record: TaxDatabase[K][number]) {
@@ -388,7 +388,7 @@ function RecordForm<T extends RecordMap>({ config, draft, errors, setDraft, onCa
   );
 }
 
-function ManualCrudPage<T extends RecordMap>({ config, rows, upsertRecord, deleteRecord, loading, error, extraSummary }: { config: ModuleConfig; rows: T[]; upsertRecord: (record: T) => void; deleteRecord: (id: string) => void; loading: boolean; error: string | null; extraSummary?: React.ReactNode }) {
+function ManualCrudPage<T extends RecordMap>({ config, rows, upsertRecord, deleteRecord, loading, error, extraSummary }: { config: ModuleConfig; rows: T[]; upsertRecord: (record: T) => void; deleteRecord: (id: string) => void; loading: boolean; error: string | null; extraSummary?: ReactNode }) {
   const [search, setSearch] = useState("");
   const [company, setCompany] = useState<Company>("All Companies");
   const [period, setPeriod] = useState("All Periods");
