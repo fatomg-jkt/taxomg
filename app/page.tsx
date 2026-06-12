@@ -1,5 +1,5 @@
-import { TaxCoordinatorDashboard } from "@/components/tax-coordinator-dashboard";
+import { redirect } from "next/navigation";
 
 export default function Home() {
-  return <TaxCoordinatorDashboard />;
+  redirect("/dashboard");
 }
