@@ -18,7 +18,6 @@ import {
   Edit3,
   Eye,
   FileText,
-  FolderOpen,
   Menu,
   Plus,
   ReceiptText,
@@ -28,6 +27,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -54,10 +54,10 @@ type TaxType =
   | "PPN Masukan"
   | "PM Tidak Dikreditkan"
   | "KB/LB PPN"
-  | "PPh 21"
-  | "PPh 23"
+  | "PPh Pasal 21"
+  | "PPh Pasal 23"
   | "PPh Final 4(2)"
-  | "PB1"
+  | "PB 1"
   | "PPh UMKM";
 type Status =
   | "Terverifikasi"
@@ -69,11 +69,13 @@ type TaxRecord = {
   id: string;
   companyName: string;
   taxPeriod: string;
+  taxYear: string;
   taxType: TaxType;
   dpp: number;
   taxAmount: number;
   ntpn: string;
   ntpd: string;
+  paymentDate: string;
   status: Status;
   sourceSheet: string;
   sourceRow: number;
@@ -96,13 +98,12 @@ type TaxDocument = {
   updatedAt: string;
 };
 type MenuId =
-  | "dashboard"
-  | "ppn"
   | "pph21"
-  | "unifikasi"
-  | "pb1"
+  | "pph23"
+  | "final42"
   | "umkm"
-  | "documents";
+  | "ppn"
+  | "pb1";
 
 const ALL = "Semua";
 const PPN_COMPANY = "CV SEPULUH JANUARI SUKSES";
@@ -113,9 +114,9 @@ const DOC_STORE = "pdf-files";
 const SOURCE_SHEETS = ["PPH-Resto", "PPN-1001", "PPH-1001", "PPH-OBS"];
 const DOC_CATEGORIES = [
   "SPT Masa PPN",
-  "SPT Masa PPh 21",
+  "SPT Masa PPh Pasal 21",
   "SPT Masa PPh Unifikasi",
-  "PB1",
+  "PB 1",
   "PPh UMKM",
   "Bukti Potong",
   "Bukti Bayar",
@@ -128,31 +129,32 @@ const TAX_TYPES: TaxType[] = [
   "PPN Masukan",
   "PM Tidak Dikreditkan",
   "KB/LB PPN",
-  "PPh 21",
-  "PPh 23",
+  "PPh Pasal 21",
+  "PPh Pasal 23",
   "PPh Final 4(2)",
-  "PB1",
+  "PB 1",
   "PPh UMKM",
 ];
-const menus: { id: MenuId; label: string; icon: typeof BarChart3 }[] = [
-  { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-  { id: "ppn", label: "PPN", icon: ReceiptText },
-  { id: "pph21", label: "PPh Pasal 21", icon: FileText },
-  { id: "unifikasi", label: "PPh Unifikasi", icon: FileText },
-  { id: "pb1", label: "PB1", icon: Store },
-  { id: "umkm", label: "PPh UMKM", icon: Store },
-  { id: "documents", label: "Dokumen Pajak", icon: FolderOpen },
+const menus: { id: MenuId; label: string; icon: typeof BarChart3; taxType: TaxType }[] = [
+  { id: "pph21", label: "PPh Pasal 21", icon: FileText, taxType: "PPh Pasal 21" },
+  { id: "pph23", label: "PPh Pasal 23", icon: FileText, taxType: "PPh Pasal 23" },
+  { id: "final42", label: "PPh Final 4 Ayat 2", icon: FileText, taxType: "PPh Final 4(2)" },
+  { id: "umkm", label: "PPh UMKM", icon: Store, taxType: "PPh UMKM" },
+  { id: "ppn", label: "PPN", icon: ReceiptText, taxType: "PPN Keluaran" },
+  { id: "pb1", label: "PB 1", icon: Store, taxType: "PB 1" },
 ];
 
 const blankRecord: TaxRecord = {
   id: "",
   companyName: "",
   taxPeriod: "",
-  taxType: "PPh 21",
+  taxType: "PPh Pasal 21",
+  taxYear: "2026",
   dpp: 0,
   taxAmount: 0,
   ntpn: "",
   ntpd: "",
+  paymentDate: "",
   status: "Nihil",
   sourceSheet: "Manual",
   sourceRow: 0,
@@ -270,7 +272,8 @@ function completeRecord(row: TaxRecord) {
     id: row.id || crypto.randomUUID(),
     companyName: company,
     taxPeriod: row.taxPeriod || "-",
-    status: computeStatus(row.taxAmount, row.dpp, row.ntpn, row.ntpd, row.note),
+    taxYear: row.taxYear || "2026",
+    status: row.inputSource === "manual_input" ? row.status : computeStatus(row.taxAmount, row.dpp, row.ntpn, row.ntpd, row.note),
     updatedAt: now,
     createdAt: row.createdAt || now,
   };
@@ -365,6 +368,7 @@ function parseSheet(sheetName: string, raw: unknown[][]) {
         companyName,
         taxPeriod,
         taxType,
+        taxYear: "2026",
         dpp: numeric(dpp),
         taxAmount: numeric(tax),
         ntpn: ntpd ? "" : normalize(payment),
@@ -389,17 +393,17 @@ function parseSheet(sheetName: string, raw: unknown[][]) {
       );
       return;
     }
-    add("PPh 21", r[2], r[3], r[4]);
-    add("PPh 23", r[5], r[6], r[7]);
+    add("PPh Pasal 21", r[2], r[3], r[4]);
+    add("PPh Pasal 23", r[5], r[6], r[7]);
     add("PPh Final 4(2)", r[8], r[9], r[10]);
-    add("PB1", r[11], r[12], r[13], true);
+    add("PB 1", r[11], r[12], r[13], true);
     add("PPh UMKM", r[14], r[15], r[16]);
   });
   return rows;
 }
 
 export function TaxCoordinatorDashboard() {
-  const [active, setActive] = useState<MenuId>("dashboard");
+  const [active, setActive] = useState<MenuId>("pph21");
   const [mobile, setMobile] = useState(false);
   const [records, setRecords] = useState<TaxRecord[]>([]);
   const [documents, setDocuments] = useState<TaxDocument[]>([]);
@@ -407,6 +411,7 @@ export function TaxCoordinatorDashboard() {
   const [company, setCompany] = useState(ALL);
   const [taxPeriod, setTaxPeriod] = useState(ALL);
   const [taxType, setTaxType] = useState(ALL);
+  const [taxYear, setTaxYear] = useState(ALL);
   const [payStatus, setPayStatus] = useState(ALL);
   const [sourceSheet, setSourceSheet] = useState(ALL);
   const [search, setSearch] = useState("");
@@ -437,13 +442,14 @@ export function TaxCoordinatorDashboard() {
           (company === ALL || r.companyName === company) &&
           (taxPeriod === ALL || r.taxPeriod === taxPeriod) &&
           (taxType === ALL || r.taxType === taxType) &&
+          (taxYear === ALL || r.taxYear === taxYear) &&
           (payStatus === ALL || r.status === payStatus) &&
           (sourceSheet === ALL || r.sourceSheet === sourceSheet) &&
           `${r.companyName} ${r.taxPeriod} ${r.taxType} ${r.ntpn} ${r.ntpd} ${r.note}`
             .toLowerCase()
             .includes(search.toLowerCase()),
       ),
-    [records, company, taxPeriod, taxType, payStatus, sourceSheet, search],
+    [records, company, taxPeriod, taxType, taxYear, payStatus, sourceSheet, search],
   );
   const ppnRecords = useMemo(
     () =>
@@ -458,13 +464,14 @@ export function TaxCoordinatorDashboard() {
           ].includes(r.taxType) &&
           (taxPeriod === ALL || r.taxPeriod === taxPeriod) &&
           (taxType === ALL || r.taxType === taxType) &&
+          (taxYear === ALL || r.taxYear === taxYear) &&
           (payStatus === ALL || r.status === payStatus) &&
           (sourceSheet === ALL || r.sourceSheet === sourceSheet) &&
           `${r.companyName} ${r.taxPeriod} ${r.taxType} ${r.ntpn} ${r.ntpd} ${r.note}`
             .toLowerCase()
             .includes(search.toLowerCase()),
       ),
-    [records, taxPeriod, taxType, payStatus, sourceSheet, search],
+    [records, taxPeriod, taxType, taxYear, payStatus, sourceSheet, search],
   );
   const companies = [
     ALL,
@@ -474,21 +481,13 @@ export function TaxCoordinatorDashboard() {
     ALL,
     ...Array.from(new Set(records.map((r) => r.taxPeriod))).sort(),
   ];
+  const years = [ALL, ...Array.from(new Set(records.map((r) => r.taxYear || "2026"))).sort()];
   const sheets = [ALL, ...SOURCE_SHEETS, "Manual"];
+  const activeMenu = menus.find((m) => m.id === active) ?? menus[0];
   const pageRows =
     active === "ppn"
       ? ppnRecords
-      : active === "pph21"
-        ? filtered.filter((r) => r.taxType === "PPh 21")
-        : active === "unifikasi"
-          ? filtered.filter(
-              (r) => r.taxType === "PPh 23" || r.taxType === "PPh Final 4(2)",
-            )
-          : active === "pb1"
-            ? filtered.filter((r) => r.taxType === "PB1")
-            : active === "umkm"
-              ? filtered.filter((r) => r.taxType === "PPh UMKM")
-              : filtered;
+      : filtered.filter((r) => r.taxType === activeMenu.taxType);
   const sumType = (type: TaxType) =>
     filtered
       .filter((r) => r.taxType === type)
@@ -499,7 +498,7 @@ export function TaxCoordinatorDashboard() {
     filtered
       .filter(
         (r) =>
-          r.ntpn && (r.taxType === "PPh 23" || r.taxType === "PPh Final 4(2)"),
+          r.ntpn && (r.taxType === "PPh Pasal 23" || r.taxType === "PPh Final 4(2)"),
       )
       .reduce(
         (a, r) => ({
@@ -612,8 +611,15 @@ export function TaxCoordinatorDashboard() {
     ]);
     e.target.value = "";
   }
+  void setDocDraft;
+  void pdfRef;
+  void sumType;
+  void duplicateNtpn;
+  void resume;
+  void uploadPdf;
+  void Documents;
   const filters = (
-    <div className="grid gap-3 lg:grid-cols-7">
+    <div className="grid gap-3 lg:grid-cols-8">
       <Select value={company} onChange={(e) => setCompany(e.target.value)}>
         {companies.map((x) => (
           <option key={x}>{x}</option>
@@ -626,6 +632,11 @@ export function TaxCoordinatorDashboard() {
       </Select>
       <Select value={taxType} onChange={(e) => setTaxType(e.target.value)}>
         {[ALL, ...TAX_TYPES].map((x) => (
+          <option key={x}>{x}</option>
+        ))}
+      </Select>
+      <Select value={taxYear} onChange={(e) => setTaxYear(e.target.value)}>
+        {years.map((x) => (
           <option key={x}>{x}</option>
         ))}
       </Select>
@@ -678,7 +689,7 @@ export function TaxCoordinatorDashboard() {
           <ReceiptText />
         </div>
         <div>
-          <p className="font-black">Tax Coordinator</p>
+          <p className="font-black">Dashboard Pajak</p>
           <p className="text-xs text-slate-400">Dashboard Perpajakan</p>
         </div>
       </div>
@@ -686,26 +697,43 @@ export function TaxCoordinatorDashboard() {
         {menus.map((m) => {
           const Icon = m.icon;
           return (
-            <button
-              key={m.id}
-              className={cn(
-                "menu",
-                active === m.id && "bg-blue-600 text-white",
+            <div key={m.id}>
+              <button
+                className={cn(
+                  "menu",
+                  active === m.id && "bg-blue-600 text-white",
+                )}
+                onClick={() => {
+                  setActive(m.id);
+                  setMobile(false);
+                }}
+              >
+                <Icon className="h-4 w-4" />
+                {m.label}
+              </button>
+              {active === m.id && (
+                <button
+                  className="menu ml-6 mt-1 w-[calc(100%-1.5rem)] bg-white/5 text-slate-100"
+                  onClick={() => {
+                    setDraft({
+                      ...blankRecord,
+                      companyName: m.id === "ppn" ? PPN_COMPANY : blankRecord.companyName,
+                      taxType: m.id === "ppn" ? "PPN Keluaran" : m.taxType,
+                    });
+                    setFormOpen(true);
+                    setMobile(false);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                  Input Manual
+                </button>
               )}
-              onClick={() => {
-                setActive(m.id);
-                setMobile(false);
-              }}
-            >
-              <Icon className="h-4 w-4" />
-              {m.label}
-            </button>
+            </div>
           );
         })}
       </nav>
       <p className="mt-auto rounded-xl bg-white/5 p-3 text-xs text-slate-300">
-        Data tersimpan permanen di localStorage; PDF disimpan di IndexedDB
-        browser.
+        Data pembayaran pajak tersimpan di browser dan otomatis memperbarui resume.
       </p>
     </aside>
   );
@@ -737,8 +765,7 @@ export function TaxCoordinatorDashboard() {
                 {menus.find((m) => m.id === active)?.label}
               </h1>
               <p className="text-sm font-medium text-slate-500">
-                Dashboard utama berisi resume; detail data berada di sidebar
-                jenis pajak.
+                Dashboard menampilkan resume pembayaran pajak berdasarkan data Excel dan input manual.
               </p>
             </div>
           </div>
@@ -749,157 +776,106 @@ export function TaxCoordinatorDashboard() {
             {message}
           </div>
         )}
-        {active === "dashboard" ? (
-          <>
-            <Cards
-              data={[
-                ["Total PPN Keluaran", sumType("PPN Keluaran")],
-                ["Total PPN Masukan", sumType("PPN Masukan")],
-                ["Total PM Tidak Dikreditkan", sumType("PM Tidak Dikreditkan")],
-                ["Total Pembayaran PPN", sumType("KB/LB PPN")],
-                ["Total PPh Pasal 21", sumType("PPh 21")],
-                ["Total PPh Pasal 23", sumType("PPh 23")],
-                ["Total PPh Final 4(2)", sumType("PPh Final 4(2)")],
-                ["Total PB1", sumType("PB1")],
-                ["Total PPh UMKM", sumType("PPh UMKM")],
-                [
-                  "Total seluruh pembayaran pajak",
-                  filtered.reduce((a, r) => a + r.taxAmount, 0),
-                ],
-                [
-                  "Jumlah perusahaan",
-                  new Set(filtered.map((r) => r.companyName)).size,
-                ],
-                [
-                  "Jumlah masa pajak",
-                  new Set(filtered.map((r) => r.taxPeriod)).size,
-                ],
-                [
-                  "Jumlah NTPN/NTPD terisi",
-                  filtered.filter((r) => r.ntpn || r.ntpd).length,
-                ],
-                [
-                  "Belum memiliki NTPN/NTPD",
-                  filtered.filter((r) => r.taxAmount && !r.ntpn && !r.ntpd)
-                    .length,
-                ],
-              ]}
-            />
-            <DataTable
-              title="Resume Pembayaran Pajak"
-              rows={resume}
-              columns={[
-                "perusahaan",
-                "masaPajak",
-                "jenisPajak",
-                "totalDpp",
-                "totalPajak",
-                "ntpnNtptd",
-                "status",
-              ]}
-            />
-          </>
-        ) : active === "documents" ? (
-          <Documents
-            documents={documents}
-            setDocuments={setDocuments}
-            docDraft={docDraft}
-            setDocDraft={setDocDraft}
-            pdfRef={pdfRef}
-            uploadPdf={uploadPdf}
+        <>
+          <Toolbar
+            onAdd={() => {
+              setDraft({
+                ...blankRecord,
+                companyName: active === "ppn" ? PPN_COMPANY : blankRecord.companyName,
+                taxType: active === "ppn" ? "PPN Keluaran" : activeMenu.taxType,
+              });
+              setFormOpen(true);
+            }}
+            onExport={() => csv(`${active}.csv`, tableRows(active, pageRows, dppType), columns(active).filter((c) => c !== "aksi"))}
           />
-        ) : (
-          <>
-            <Toolbar
-              onAdd={() => {
-                setDraft({
-                  ...blankRecord,
-                  companyName:
-                    active === "ppn" ? PPN_COMPANY : blankRecord.companyName,
-                  taxType:
-                    active === "ppn"
-                      ? "PPN Keluaran"
-                      : active === "pph21"
-                        ? "PPh 21"
-                        : active === "pb1"
-                          ? "PB1"
-                          : active === "umkm"
-                            ? "PPh UMKM"
-                            : "PPh 23",
-                });
-                setFormOpen(true);
-              }}
-              onExport={() => {
-                const visibleColumns = columns(active).filter(
-                  (c) => c !== "aksi",
-                );
-                csv(
-                  `${active}.csv`,
-                  tableRows(active, pageRows, dppType),
-                  visibleColumns,
-                );
-              }}
+          {active === "ppn" && (
+            <p className="my-3 rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">
+              Halaman PPN ini khusus menampilkan resume Pajak Keluaran, Pajak Masukan, dan KB/LB.
+            </p>
+          )}
+          {formOpen && (
+            <ManualForm
+              draft={draft}
+              setDraft={setDraft}
+              onSubmit={saveManual}
+              onClose={() => setFormOpen(false)}
+              active={active}
             />
-            {active === "ppn" && (
-              <p className="my-3 rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">
-                Halaman PPN ini khusus untuk {PPN_COMPANY}. Perhitungan KB/LB =
-                PK PPN - PM PPN.
-              </p>
-            )}
-            {formOpen && (
-              <ManualForm
-                draft={draft}
-                setDraft={setDraft}
-                onSubmit={saveManual}
-                onClose={() => setFormOpen(false)}
-                active={active}
-              />
-            )}{" "}
-            {active === "unifikasi" && (
-              <p className="my-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-700">
-                Catatan: NTPN digunakan untuk dua jenis pajak:{" "}
-                {duplicateNtpn.join(", ") || "tidak ada pada filter ini"}.
-              </p>
-            )}
-            <Cards
-              data={[
-                ["Total DPP", pageRows.reduce((a, r) => a + r.dpp, 0)],
-                ["Total Pajak", pageRows.reduce((a, r) => a + r.taxAmount, 0)],
-                [
-                  "Jumlah perusahaan",
-                  new Set(pageRows.map((r) => r.companyName)).size,
-                ],
-                [
-                  "NTPN/NTPD terisi",
-                  pageRows.filter((r) => r.ntpn || r.ntpd).length,
-                ],
-                [
-                  "Belum lengkap",
-                  pageRows.filter((r) => r.status === "Belum Lengkap").length,
-                ],
-              ]}
-            />
-            <DataTable
-              title={menus.find((m) => m.id === active)?.label ?? "Data"}
-              rows={tableRows(active, pageRows, dppType)}
-              columns={columns(active)}
-              onEdit={(id) => {
-                const rec = records.find((r) => r.id === id);
-                if (rec) {
-                  setDraft(rec);
-                  setFormOpen(true);
-                }
-              }}
-              onDelete={(id) =>
-                setRecords((cur) => cur.filter((r) => r.id !== id))
-              }
-            />
-          </>
-        )}
+          )}
+          <Cards
+            data={summaryCards(active, pageRows)}
+          />
+          <TaxChart active={active} rows={pageRows} />
+          <DataTable
+            title={`Tabel Resume Pembayaran Pajak ${activeMenu.label}`}
+            rows={tableRows(active, pageRows, dppType)}
+            columns={columns(active)}
+            onEdit={(id) => {
+              const rec = records.find((r) => r.id === id);
+              if (rec) { setDraft(rec); setFormOpen(true); }
+            }}
+            onDelete={(id) => setRecords((cur) => cur.filter((r) => r.id !== id))}
+          />
+        </>
       </section>
     </main>
   );
 }
+
+function summaryCards(active: MenuId, rows: TaxRecord[]): [string, number | string][] {
+  const periods = Array.from(new Set(rows.map((r) => r.taxPeriod))).filter(Boolean).join(", ") || "-";
+  const payments = rows.filter((r) => r.taxAmount || r.ntpn || r.ntpd);
+  if (active === "ppn") {
+    const output = rows.filter((r) => r.taxType === "PPN Keluaran").reduce((a, r) => a + r.taxAmount, 0);
+    const input = rows.filter((r) => r.taxType === "PPN Masukan").reduce((a, r) => a + r.taxAmount, 0);
+    return [
+      ["Total Pajak Keluaran", output],
+      ["Total Pajak Masukan", input],
+      ["Total KB Atau LB", output - input],
+      ["Masa Pajak", periods],
+      ["NTPN", Array.from(new Set(rows.map((r) => r.ntpn).filter(Boolean))).join(", ") || "-"],
+    ];
+  }
+  return [
+    ["Total DPP", rows.reduce((a, r) => a + r.dpp, 0)],
+    ["Total Pajak Yang Dibayar", rows.reduce((a, r) => a + r.taxAmount, 0)],
+    ["Jumlah Transaksi Pembayaran", payments.length],
+    ["Jumlah Perusahaan", new Set(rows.map((r) => r.companyName)).size],
+    ["Masa Pajak Yang Tersedia", periods],
+    ["Daftar NTPN Atau NTPD", Array.from(new Set(rows.map((r) => r.ntpn || r.ntpd).filter(Boolean))).join(", ") || "-"],
+  ];
+}
+function TaxChart({ active, rows }: { active: MenuId; rows: TaxRecord[] }) {
+  const data = Array.from(new Set(rows.map((r) => r.taxPeriod))).map((masaPajak) => {
+    const group = rows.filter((r) => r.taxPeriod === masaPajak);
+    if (active === "ppn") {
+      const pajakKeluaran = group.filter((r) => r.taxType === "PPN Keluaran").reduce((a, r) => a + r.taxAmount, 0);
+      const pajakMasukan = group.filter((r) => r.taxType === "PPN Masukan").reduce((a, r) => a + r.taxAmount, 0);
+      return { masaPajak, pajakKeluaran, pajakMasukan, kbAtauLb: pajakKeluaran - pajakMasukan };
+    }
+    return { masaPajak, pembayaran: group.reduce((a, r) => a + r.taxAmount, 0), dpp: group.reduce((a, r) => a + r.dpp, 0) };
+  });
+  return (
+    <Card className="mt-6">
+      <CardHeader>
+        <CardTitle>{active === "ppn" ? "Grafik Perbandingan Pajak Keluaran, Pajak Masukan, Dan KB Atau LB" : "Grafik Ringkas Pembayaran Per Masa Pajak"}</CardTitle>
+      </CardHeader>
+      <CardContent className="h-80">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="masaPajak" />
+            <YAxis tickFormatter={(v) => new Intl.NumberFormat("id-ID", { notation: "compact" }).format(Number(v))} />
+            <Tooltip formatter={(v) => money(Number(v))} />
+            <Legend />
+            {active === "ppn" ? <><Bar dataKey="pajakKeluaran" name="Pajak Keluaran" fill="#2563eb" /><Bar dataKey="pajakMasukan" name="Pajak Masukan" fill="#16a34a" /><Bar dataKey="kbAtauLb" name="KB Atau LB" fill="#ca8a04" /></> : <><Bar dataKey="dpp" name="DPP" fill="#60a5fa" /><Bar dataKey="pembayaran" name="Pembayaran Pajak" fill="#1d4ed8" /></>}
+          </BarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
 function tableRows(
   active: MenuId,
   rows: TaxRecord[],
@@ -1019,7 +995,7 @@ function Toolbar({
     <div className="mb-4 flex flex-wrap gap-2">
       <Button onClick={onAdd}>
         <Plus className="h-4 w-4" />
-        Tambah Data Manual
+        Input Manual
       </Button>
       <Button variant="outline" onClick={onExport}>
         <Download className="h-4 w-4" />
@@ -1042,11 +1018,9 @@ function ManualForm({
   active: MenuId;
 }) {
   const allowed =
-    active === "unifikasi"
-      ? ["PPh 23", "PPh Final 4(2)"]
-      : active === "ppn"
-        ? ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "KB/LB PPN"]
-        : [draft.taxType];
+    active === "ppn"
+      ? ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "KB/LB PPN"]
+      : [draft.taxType];
   return (
     <Card className="mb-4">
       <CardHeader>
@@ -1059,7 +1033,7 @@ function ManualForm({
         >
           <Input
             required
-            placeholder="Perusahaan"
+            placeholder="Nama Perusahaan"
             value={draft.companyName}
             onChange={(e) =>
               setDraft({ ...draft, companyName: e.target.value })
@@ -1082,8 +1056,13 @@ function ManualForm({
             ))}
           </Select>
           <Input
+            placeholder="Tahun Pajak"
+            value={draft.taxYear}
+            onChange={(e) => setDraft({ ...draft, taxYear: e.target.value })}
+          />
+          <Input
             type="number"
-            placeholder="DPP"
+            placeholder={active === "ppn" && draft.taxType === "PPN Keluaran" ? "Pajak Keluaran DPP" : active === "ppn" && draft.taxType === "PPN Masukan" ? "Pajak Masukan DPP" : "DPP"}
             value={draft.dpp}
             onChange={(e) =>
               setDraft({ ...draft, dpp: Number(e.target.value) })
@@ -1091,22 +1070,34 @@ function ManualForm({
           />
           <Input
             type="number"
-            placeholder="Pajak"
+            placeholder={active === "ppn" && draft.taxType === "PPN Keluaran" ? "Pajak Keluaran PPN" : active === "ppn" && draft.taxType === "PPN Masukan" ? "Pajak Masukan PPN" : active === "ppn" && draft.taxType === "KB/LB PPN" ? "KB Atau LB" : "Nominal Pajak"}
             value={draft.taxAmount}
             onChange={(e) =>
               setDraft({ ...draft, taxAmount: Number(e.target.value) })
             }
           />
           <Input
-            placeholder="NTPN"
+            placeholder="NTPN Atau NTPD"
             value={draft.ntpn}
             onChange={(e) => setDraft({ ...draft, ntpn: e.target.value })}
           />
           <Input
-            placeholder="NTPD/NTPN PB1"
+            placeholder="NTPD Atau NTPN PB 1"
             value={draft.ntpd}
             onChange={(e) => setDraft({ ...draft, ntpd: e.target.value })}
           />
+          <Input
+            type="date"
+            placeholder="Tanggal Pembayaran"
+            value={draft.paymentDate}
+            onChange={(e) => setDraft({ ...draft, paymentDate: e.target.value })}
+          />
+          <Select
+            value={draft.status}
+            onChange={(e) => setDraft({ ...draft, status: e.target.value as Status })}
+          >
+            {["Terverifikasi", "Belum Lengkap", "Nihil", "Lebih Bayar", "Kompensasi"].map((x) => <option key={x}>{x}</option>)}
+          </Select>
           <Input
             placeholder="Keterangan"
             value={draft.note}
@@ -1258,7 +1249,7 @@ function Documents({
             ))}
           </Select>
           <Input
-            placeholder="Perusahaan"
+            placeholder="Nama Perusahaan"
             value={docDraft.companyName}
             onChange={(e) =>
               setDocDraft({ ...docDraft, companyName: e.target.value })
