@@ -304,6 +304,103 @@ function csv(
   a.download = name;
   a.click();
 }
+
+function normalizedPeriod(value: string) {
+  const text = normalize(value);
+  if (!text || text === "-") return "";
+  const parsed = new Date(text.replace(/-/g, " 1 "));
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toLocaleDateString("en-US", { month: "short", year: "numeric" }).replace(" ", "-");
+  }
+  const match = text.match(/^([A-Za-z]{3,})[-\s]?(\d{2}|\d{4})$/);
+  if (!match) return text;
+  const year = match[2].length === 2 ? `20${match[2]}` : match[2];
+  return `${match[1].slice(0, 3)}-${year}`;
+}
+function ntpnStatus(row: Pick<TaxRecord, "taxAmount" | "ntpn" | "ntpd" | "note">) {
+  const value = normalize(row.ntpn || row.ntpd);
+  const text = `${value} ${row.note}`.toLowerCase();
+  if (row.taxAmount < 0 || /kompensasi|lebih bayar|\blb\b/.test(text)) return "Kompensasi / LB";
+  if (!value) return "Kosong";
+  if (value === "-") return "Tidak Ada";
+  if (/ntpn tidak ada|tidak ada/.test(text)) return "Kompensasi / LB";
+  if (/^[A-Z0-9-]{8,}$/i.test(value)) return "Lengkap";
+  return "Perlu Review";
+}
+function excelAoA(sheet: XLSX.WorkSheet, rows: unknown[][]) {
+  XLSX.utils.sheet_add_aoa(sheet, rows, { origin: -1 });
+}
+function setWidths(sheet: XLSX.WorkSheet, widths: number[]) {
+  sheet["!cols"] = widths.map((wch) => ({ wch }));
+}
+function formulaize(sheet: XLSX.WorkSheet, currencyColumns: number[] = []) {
+  const range = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : undefined;
+  if (!range) return;
+  for (let r = range.s.r; r <= range.e.r; r += 1) {
+    for (let c = range.s.c; c <= range.e.c; c += 1) {
+      const address = XLSX.utils.encode_cell({ r, c });
+      const cell = sheet[address];
+      if (!cell) continue;
+      if (typeof cell.v === "string" && cell.v.startsWith("=")) {
+        cell.f = cell.v.slice(1);
+        cell.v = undefined;
+        cell.t = "n";
+      }
+      if (currencyColumns.includes(c)) cell.z = '"Rp" #,##0;[Red]-"Rp" #,##0;"Rp" 0';
+    }
+  }
+}
+function exportDashboardWorkbook(records: TaxRecord[]) {
+  const wb = XLSX.utils.book_new();
+  const rawRows = records.map((r) => ({
+    "Sumber Sheet": r.sourceSheet,
+    Perusahaan: r.companyName,
+    "Masa Pajak": normalizedPeriod(r.taxPeriod),
+    "Jenis Pajak": r.taxType.startsWith("PPN") || r.taxType === "KB/LB PPN" ? "PPN" : r.taxType,
+    "Subjenis / Kategori": r.taxType,
+    DPP: r.dpp,
+    "Nilai Pajak": r.taxAmount,
+    "NTPN / NTPD": r.ntpn || r.ntpd || r.note,
+    "Status Pembayaran": ntpnStatus(r),
+    Catatan: r.note,
+  }));
+  const raw = XLSX.utils.json_to_sheet(rawRows.length ? rawRows : [{ "Sumber Sheet": "", Perusahaan: "", "Masa Pajak": "", "Jenis Pajak": "", "Subjenis / Kategori": "", DPP: 0, "Nilai Pajak": 0, "NTPN / NTPD": "", "Status Pembayaran": "Kosong", Catatan: "" }]);
+  raw["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rawRows.length, c: 9 } }) };
+  raw["!freeze"] = { xSplit: 0, ySplit: 1 };
+  setWidths(raw, [16, 28, 14, 18, 22, 16, 16, 28, 20, 48]);
+  formulaize(raw, [5, 6]);
+  XLSX.utils.book_append_sheet(wb, raw, "Raw Data");
+
+  const companies = Array.from(new Set(rawRows.map((r) => r.Perusahaan).filter(Boolean))).sort();
+  const periods = Array.from(new Set(rawRows.map((r) => r["Masa Pajak"]).filter(Boolean))).sort();
+  const types = ["PPH Pasal 21", "PPH Pasal 23", "PPH Final 4(2)", "PPH UMKM", "PB 1", "PPN"];
+  const dashboard = XLSX.utils.aoa_to_sheet([["Dashboard Pajak Interaktif"], ["Gunakan filter Excel pada setiap tabel untuk menyaring Perusahaan, Masa Pajak, Jenis Pajak, Sumber Sheet, dan Status Pembayaran."], []]);
+  excelAoA(dashboard, [["KPI", "Formula"], ["Total DPP", "=SUM('Raw Data'!F:F)"], ["Total Pajak Dibayar", "=SUM('Raw Data'!G:G)"], ["Total PPH", '=SUM(SUMIF(\'Raw Data\'!D:D,{"PPH Pasal 21","PPH Pasal 23","PPH Final 4(2)","PPH UMKM"},\'Raw Data\'!G:G))'], ["Total PPN", '=SUMIF(\'Raw Data\'!D:D,"PPN",\'Raw Data\'!G:G)'], ["Total PB 1", '=SUMIF(\'Raw Data\'!D:D,"PB 1",\'Raw Data\'!G:G)'], ["Jumlah Masa Pajak Terisi", '=COUNTA(UNIQUE(FILTER(\'Raw Data\'!C:C,\'Raw Data\'!C:C<>"Masa Pajak")))'], ["Jumlah Transaksi Pajak", "=COUNTA('Raw Data'!A:A)-1"], ["Jumlah NTPN/NTPD Kosong atau Bermasalah", '=COUNTIF(\'Raw Data\'!I:I,"Kosong")+COUNTIF(\'Raw Data\'!I:I,"Tidak Ada")+COUNTIF(\'Raw Data\'!I:I,"Perlu Review")']]);
+  excelAoA(dashboard, [[], ["Analisis", "Formula"], ["Perusahaan total pajak terbesar", '=INDEX(\'Summary Perusahaan\'!A:A,MATCH(MAX(\'Summary Perusahaan\'!I:I),\'Summary Perusahaan\'!I:I,0))'], ["Jenis pajak kontribusi terbesar", '=INDEX(N:N,MATCH(MAX(O:O),O:O,0))'], ["Bulan pembayaran tertinggi", '=INDEX(\'Summary Bulanan\'!A:A,MATCH(MAX(\'Summary Bulanan\'!C:C),\'Summary Bulanan\'!C:C,0))'], ["Ringkasan KB/(LB) PPN", '=SUM(\'Summary Bulanan\'!K:K)']]);
+  const monthStart = dashboard["!ref"] ? XLSX.utils.decode_range(dashboard["!ref"]).e.r + 4 : 1;
+  excelAoA(dashboard, [[], ["Grafik total pajak per bulan", "Total Pajak"], ...periods.map((p, i) => [p, `=SUMIF('Raw Data'!C:C,A${monthStart + i},'Raw Data'!G:G)`])]);
+  const typeStart = dashboard["!ref"] ? XLSX.utils.decode_range(dashboard["!ref"]).e.r + 4 : 1;
+  excelAoA(dashboard, [[], ["Grafik total pajak per jenis pajak", "Total Pajak"], ...types.map((t, i) => [t, `=SUMIF('Raw Data'!D:D,A${typeStart + i},'Raw Data'!G:G)`])]);
+  setWidths(dashboard, [34, 34, 20, 20, 20, 20]);
+  formulaize(dashboard, [1]);
+  XLSX.utils.book_append_sheet(wb, dashboard, "Dashboard");
+
+  const perusahaan = XLSX.utils.aoa_to_sheet([["Perusahaan", "Total DPP", "Total PPH 21", "Total PPH 23", "Total PPH Final 4(2)", "Total PPH UMKM", "Total PB 1", "Total PPN", "Total Pajak Keseluruhan", "Jumlah Masa Pajak", "Status Kelengkapan NTPN"], ...companies.map((c, i) => { const row = i + 2; return [c, `=SUMIF('Raw Data'!B:B,A${row},'Raw Data'!F:F)`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!B:B,A${row},'Raw Data'!E:E,"PPh Pasal 21")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!B:B,A${row},'Raw Data'!E:E,"PPh Pasal 23")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!B:B,A${row},'Raw Data'!E:E,"PPh Final 4(2)")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!B:B,A${row},'Raw Data'!E:E,"PPh UMKM")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!B:B,A${row},'Raw Data'!D:D,"PB 1")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!B:B,A${row},'Raw Data'!D:D,"PPN")`, `=SUMIF('Raw Data'!B:B,A${row},'Raw Data'!G:G)`, `=COUNTA(UNIQUE(FILTER('Raw Data'!C:C,'Raw Data'!B:B=A${row})))`, `=IF(COUNTIFS('Raw Data'!B:B,A${row},'Raw Data'!I:I,"Lengkap")=COUNTIF('Raw Data'!B:B,A${row}),"Lengkap","Perlu Review")`]; })]);
+  setWidths(perusahaan, [30,16,16,16,20,16,16,16,18,16,24]);
+  formulaize(perusahaan, [1, 2, 3, 4, 5, 6, 7, 8]);
+  XLSX.utils.book_append_sheet(wb, perusahaan, "Summary Perusahaan");
+  const bulanan = XLSX.utils.aoa_to_sheet([["Masa Pajak", "Total DPP", "Total Pajak", "PPH 21", "PPH 23", "PPH Final 4(2)", "PPH UMKM", "PB 1", "PPN Keluaran", "PPN Masukan", "KB/(LB)", "Jumlah perusahaan aktif"], ...periods.map((p, i) => { const row = i + 2; return [p, `=SUMIF('Raw Data'!C:C,A${row},'Raw Data'!F:F)`, `=SUMIF('Raw Data'!C:C,A${row},'Raw Data'!G:G)`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!C:C,A${row},'Raw Data'!E:E,"PPh Pasal 21")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!C:C,A${row},'Raw Data'!E:E,"PPh Pasal 23")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!C:C,A${row},'Raw Data'!E:E,"PPh Final 4(2)")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!C:C,A${row},'Raw Data'!E:E,"PPh UMKM")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!C:C,A${row},'Raw Data'!D:D,"PB 1")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!C:C,A${row},'Raw Data'!E:E,"PPN Keluaran")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!C:C,A${row},'Raw Data'!E:E,"PPN Masukan")`, `=SUMIFS('Raw Data'!G:G,'Raw Data'!C:C,A${row},'Raw Data'!E:E,"KB/LB PPN")`, `=COUNTA(UNIQUE(FILTER('Raw Data'!B:B,'Raw Data'!C:C=A${row})))`]; })]);
+  setWidths(bulanan, [14,16,16,16,16,20,16,16,16,16,16,22]);
+  formulaize(bulanan, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  XLSX.utils.book_append_sheet(wb, bulanan, "Summary Bulanan");
+  const kontrol = XLSX.utils.json_to_sheet(rawRows.map((r) => ({ Perusahaan: r.Perusahaan, "Masa Pajak": r["Masa Pajak"], "Jenis Pajak": r["Subjenis / Kategori"], "Nilai Pajak": r["Nilai Pajak"], "NTPN / NTPD": r["NTPN / NTPD"], Status: r["Status Pembayaran"], Catatan: r.Catatan })));
+  setWidths(kontrol, [30,14,20,16,28,20,48]);
+  formulaize(kontrol, [3]);
+  kontrol["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rawRows.length, c: 6 } }) };
+  XLSX.utils.book_append_sheet(wb, kontrol, "Kontrol NTPN");
+  XLSX.writeFile(wb, `dashboard-pajak-${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
 async function db() {
   return new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
@@ -787,6 +884,7 @@ export function TaxCoordinatorDashboard() {
               setFormOpen(true);
             }}
             onExport={() => csv(`${active}.csv`, tableRows(active, pageRows, dppType), columns(active).filter((c) => c !== "aksi"))}
+            onExportWorkbook={() => exportDashboardWorkbook(filtered)}
           />
           {active === "ppn" && (
             <p className="my-3 rounded-xl bg-blue-50 p-3 text-sm font-semibold text-blue-700">
@@ -987,9 +1085,11 @@ function Cards({ data }: { data: [string, number | string][] }) {
 function Toolbar({
   onAdd,
   onExport,
+  onExportWorkbook,
 }: {
   onAdd: () => void;
   onExport: () => void;
+  onExportWorkbook: () => void;
 }) {
   return (
     <div className="mb-4 flex flex-wrap gap-2">
@@ -1000,6 +1100,10 @@ function Toolbar({
       <Button variant="outline" onClick={onExport}>
         <Download className="h-4 w-4" />
         Export CSV
+      </Button>
+      <Button variant="outline" onClick={onExportWorkbook}>
+        <Download className="h-4 w-4" />
+        Export Workbook Dashboard
       </Button>
     </div>
   );
