@@ -8,5 +8,5 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try { return NextResponse.json(await createManualEntry(await request.json()), { status: 201 }); }
-  catch (error) { console.error("[api] Static file save", error); return NextResponse.json({ error: `Gagal menyimpan data: ${error instanceof Error ? error.message : "Mode file statis aktif. Download Updated JSON untuk menyimpan data."}` }, { status: 500 }); }
+  catch (error) { console.error("[api] Static file save", error); return NextResponse.json({ error: `Gagal menyimpan data: ${error instanceof Error ? error.message : "Mode file statis aktif. Data sementara tersimpan di browser."}` }, { status: 500 }); }
 }

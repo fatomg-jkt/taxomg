@@ -34,7 +34,7 @@ export async function getDashboardData() {
 }
 
 export async function createUploadBatch() {
-  return { message: "Mode file statis aktif. Download Upload History JSON dan tax-data.json untuk menyimpan hasil upload." };
+  return { message: "Mode file statis aktif. Riwayat upload dan data pajak disimpan sebagai informasi internal." };
 }
 
 export async function createManualEntry(row: Omit<TaxEntry, "id" | "created_at" | "updated_at">) {
