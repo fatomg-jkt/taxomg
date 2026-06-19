@@ -2,49 +2,60 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { AlertTriangle, CheckCircle2, Database, Download, FileSpreadsheet, Filter, Upload } from "lucide-react";
-import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Building2, CheckCircle2, FileArchive, FileSpreadsheet, Home, Menu, Receipt, Search, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
-const STORAGE_KEY = "tax-monitoring-normalized-v1";
-const ALL = "Semua";
-const TAX_TYPES = ["PPh Pasal 21", "PPh Pasal 23", "PPh Final Pasal 4 ayat 2", "PPh UMKM", "PB 1", "PPN"] as const;
-const PPH_TYPES = TAX_TYPES.slice(0, 4);
-const COLORS = ["#1d4ed8", "#0f766e", "#7c3aed", "#0891b2", "#f97316", "#0f172a"];
+const STORAGE_KEY = "tax-coordinator-normalized-v2";
+const ALL = "__all__";
+const TAX_TYPES = ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN", "PPh Pasal 21", "PPh Pasal 23", "PPh Final 4(2)", "PB1", "PPh UMKM"] as const;
+const STATUSES = ["Terverifikasi", "Belum Lengkap", "Nihil", "Lebih Bayar", "Kompensasi"] as const;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 
 type TaxType = (typeof TAX_TYPES)[number];
-type Status = "Sudah ada NTPN/NTPD" | "Belum ada NTPN/NTPD" | "Kompensasi lebih bayar" | "Data kosong" | "Nilai pajak 0";
-type Page = "summary" | "pph" | "ppn" | "pb1" | "quality";
+type Status = (typeof STATUSES)[number];
+type Page = "dashboard" | "ppn" | "pph21" | "unifikasi" | "pb1" | "umkm" | "documents";
 type ParseResult = { records: TaxTransaction[]; errors: string[]; sheetsRead: string[] };
 
 type TaxTransaction = {
   id: string;
-  company: string;
-  period: string;
-  year: string;
-  taxType: TaxType;
+  perusahaan: string;
+  masaPajak: string;
+  tahun: string;
+  jenisPajak: TaxType;
   dpp: number;
-  taxAmount: number;
+  pajakTerhutang: number;
   ntpnNtpd: string;
   status: Status;
-  note: string;
+  keterangan: string;
   sourceSheet: string;
   sourceRow: number;
-  outputVat?: number;
-  inputVat?: number;
 };
 
-type Filters = { year: string; period: string; company: string; taxType: string; status: string };
+type Filters = { tahun: string; masaPajak: string; perusahaan: string; jenisPajak: string; status: string; sourceSheet: string; search: string };
 
-function clean(value: unknown) {
-  return String(value ?? "").trim();
-}
+type KpiItem = { label: string; value: number; money?: boolean };
 
+const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[] }> = {
+  dashboard: { title: "Dashboard", subtitle: "Dashboard utama berisi resume; detail data berada di sidebar jenis pajak." },
+  ppn: { title: "PPN", subtitle: "Monitoring PPN keluaran, masukan, PM tidak dikreditkan, dan pembayaran PPN.", types: ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN"] },
+  pph21: { title: "PPh Pasal 21", subtitle: "Detail DPP, pajak terhutang, dan kelengkapan NTPN PPh Pasal 21.", types: ["PPh Pasal 21"] },
+  unifikasi: { title: "PPh Unifikasi", subtitle: "Gabungan PPh Pasal 23 dan PPh Final 4(2).", types: ["PPh Pasal 23", "PPh Final 4(2)"] },
+  pb1: { title: "PB1", subtitle: "Detail PB1 dan status NTPD pembayaran pajak daerah.", types: ["PB1"] },
+  umkm: { title: "PPh UMKM", subtitle: "Detail DPP, PPh UMKM, transaksi, dan kelengkapan NTPN.", types: ["PPh UMKM"] },
+  documents: { title: "Dokumen Pajak", subtitle: "Daftar dokumen terkait NTPN/NTPD, bukti bayar, PDF, dan file pendukung." },
+};
+
+const navItems = [
+  ["dashboard", Home, "Dashboard"], ["ppn", Receipt, "PPN"], ["pph21", Receipt, "PPh Pasal 21"], ["unifikasi", Receipt, "PPh Unifikasi"], ["pb1", Building2, "PB1"], ["umkm", Building2, "PPh UMKM"], ["documents", FileArchive, "Dokumen Pajak"],
+] as const;
+
+function clean(value: unknown) { return String(value ?? "").trim(); }
 function numberValue(value: unknown) {
   if (typeof value === "number") return value;
   const raw = clean(value);
@@ -54,118 +65,68 @@ function numberValue(value: unknown) {
   const dot = text.lastIndexOf(".");
   const decimalPos = comma > dot ? comma : dot;
   const fraction = decimalPos >= 0 ? text.slice(decimalPos + 1) : "";
-  const hasDecimal = fraction.length > 0 && fraction.length <= 2;
-  const normalized = hasDecimal
-    ? `${text.slice(0, decimalPos).replace(/[.,]/g, "")}.${fraction.replace(/[.,]/g, "")}`
-    : text.replace(/[.,]/g, "");
-  const number = Number(normalized);
-  return Number.isFinite(number) ? number : 0;
+  const normalized = fraction.length > 0 && fraction.length <= 2 ? `${text.slice(0, decimalPos).replace(/[.,]/g, "")}.${fraction.replace(/[.,]/g, "")}` : text.replace(/[.,]/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
-
-function monthIndex(name: string) {
-  const months = ["jan", "feb", "mar", "apr", "may", "mei", "jun", "jul", "aug", "agu", "sep", "oct", "okt", "nov", "dec", "des"];
-  const idx = months.findIndex((m) => name.toLowerCase().startsWith(m));
-  if (idx < 0) return 0;
-  return idx > 4 ? idx - 1 : idx;
-}
-
 function normalizePeriod(value: unknown) {
   if (typeof value === "number" && value > 20000) {
     const d = XLSX.SSF.parse_date_code(value);
-    return new Date(d.y, d.m - 1, d.d).toLocaleDateString("en-US", { month: "short", year: "2-digit" }).replace(" ", "-");
+    return `${MONTHS[d.m - 1]}-${String(d.y).slice(-2)}`;
   }
   const text = clean(value);
   if (!text) return "-";
   const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) return parsed.toLocaleDateString("en-US", { month: "short", year: "2-digit" }).replace(" ", "-");
+  if (!Number.isNaN(parsed.getTime())) return `${MONTHS[parsed.getMonth()]}-${String(parsed.getFullYear()).slice(-2)}`;
   const match = text.match(/(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*[\s/-]*(\d{2,4})/i);
   if (!match) return text;
-  const year = match[2].length === 2 ? match[2] : match[2].slice(-2);
-  return `${match[1].slice(0, 3)[0].toUpperCase()}${match[1].slice(1, 3).toLowerCase()}-${year}`;
+  const idx = ["jan", "feb", "mar", "apr", "mei", "jun", "jul", "agu", "sep", "okt", "nov", "des"].findIndex((m) => match[1].toLowerCase().startsWith(m) || (m === "mei" && match[1].toLowerCase().startsWith("may")) || (m === "agu" && match[1].toLowerCase().startsWith("aug")) || (m === "okt" && match[1].toLowerCase().startsWith("oct")) || (m === "des" && match[1].toLowerCase().startsWith("dec")));
+  return `${MONTHS[Math.max(idx, 0)]}-${match[2].length === 2 ? match[2] : match[2].slice(-2)}`;
 }
-
-function periodYear(period: string) {
-  const match = period.match(/(\d{2,4})$/);
-  if (!match) return "2026";
-  return match[1].length === 2 ? `20${match[1]}` : match[1];
-}
-
-function periodSort(period: string) {
-  const [m] = period.split("-");
-  return Number(periodYear(period)) * 100 + monthIndex(m);
-}
-
+function periodYear(period: string) { const match = period.match(/(\d{2,4})$/); return match ? (match[1].length === 2 ? `20${match[1]}` : match[1]) : String(new Date().getFullYear()); }
+function periodSort(period: string) { const [m] = period.split("-"); return Number(periodYear(period)) * 100 + Math.max(MONTHS.findIndex((month) => month === m), 0); }
 function taxTypeFromText(value: unknown, sheet = ""): TaxType | undefined {
   const text = `${value ?? ""} ${sheet}`.toLowerCase();
-  if (/pb\s*1|resto|restaurant|restoran/.test(text)) return "PB 1";
+  if (/pm\s*tidak|tidak\s+dikredit/.test(text)) return "PM Tidak Dikreditkan";
+  if (/pembayaran\s*ppn|bayar\s*ppn|kurang\s*bayar|lebih\s*bayar|kb\/?lb/.test(text)) return "Pembayaran PPN";
+  if (/ppn.*masukan|masukan.*ppn|input\s*vat/.test(text)) return "PPN Masukan";
+  if (/ppn|vat|keluaran|output\s*vat/.test(text)) return "PPN Keluaran";
+  if (/pb\s*1|pb1|resto|restaurant|restoran/.test(text)) return "PB1";
   if (/umkm/.test(text)) return "PPh UMKM";
-  if (/4\s*\(?2\)?|final/.test(text)) return "PPh Final Pasal 4 ayat 2";
+  if (/4\s*\(?2\)?|final/.test(text)) return "PPh Final 4(2)";
   if (/23/.test(text)) return "PPh Pasal 23";
   if (/21/.test(text)) return "PPh Pasal 21";
-  if (/ppn|vat|keluaran|masukan|kb|lb/.test(text)) return "PPN";
   return undefined;
 }
-
-function paymentStatus(taxAmount: number, dpp: number, ntpnNtpd: string, note: string): Status {
-  const text = `${ntpnNtpd} ${note}`.toLowerCase();
-  if (!dpp && !taxAmount) return "Data kosong";
-  if (/kompensasi|lebih bayar|\blb\b/.test(text) || taxAmount < 0) return "Kompensasi lebih bayar";
-  if (taxAmount === 0) return "Nilai pajak 0";
-  return ntpnNtpd && ntpnNtpd !== "-" ? "Sudah ada NTPN/NTPD" : "Belum ada NTPN/NTPD";
+function automaticStatus(pajak: number, ntpnNtpd: string, keterangan: string): Status {
+  const text = `${keterangan} ${ntpnNtpd}`.toLowerCase();
+  if (/kompensasi|lebih bayar/.test(text)) return "Kompensasi";
+  if (pajak < 0) return "Lebih Bayar";
+  if (pajak === 0) return "Nihil";
+  return clean(ntpnNtpd) ? "Terverifikasi" : "Belum Lengkap";
 }
-
-function hasSignal(row: unknown[]) {
-  return row.some((cell) => clean(cell)) && (row.some((cell) => numberValue(cell) !== 0) || row.some((cell) => /ntpn|ntpd|kompensasi|lebih bayar|pph|ppn|pb\s*1/i.test(clean(cell))));
-}
-
+function hasSignal(row: unknown[]) { return row.some((cell) => clean(cell)) && (row.some((cell) => numberValue(cell) !== 0) || row.some((cell) => /ntpn|ntpd|kompensasi|lebih bayar|pph|ppn|pb\s*1/i.test(clean(cell)))); }
 function rowToRecords(row: unknown[], sheet: string, idx: number, headers?: string[]) {
   const lower = (headers ?? []).map((h) => h.toLowerCase());
   const at = (...keys: string[]) => lower.findIndex((h) => keys.some((k) => h.includes(k)));
-  const companyIdx = at("perusahaan", "company", "nama perusahaan");
-  const periodIdx = at("masa", "periode", "bulan", "period");
-  const typeIdx = at("jenis", "pajak", "tax type", "kategori");
+  const perusahaanIdx = at("perusahaan", "company", "nama perusahaan");
+  const masaIdx = at("masa", "periode", "bulan", "period");
+  const jenisIdx = at("jenis", "tax type", "kategori");
   const dppIdx = at("dpp", "dasar");
-  const taxIdx = at("nilai pajak", "pajak terhutang", "jumlah pajak", "amount", "ppn", "pembayaran");
+  const pajakIdx = at("pajak terhutang", "nilai pajak", "jumlah pajak", "amount", "pembayaran", "ppn");
   const ntpnIdx = at("ntpn", "ntpd", "bukti");
-  const noteIdx = at("keterangan", "catatan", "note", "status");
-  const fallbackType = taxTypeFromText(row.join(" "), sheet);
-  const company = clean(row[companyIdx >= 0 ? companyIdx : 0]) || "Perusahaan Belum Diisi";
-  const period = normalizePeriod(row[periodIdx >= 0 ? periodIdx : 1]);
-  const note = clean(row[noteIdx >= 0 ? noteIdx : row.length - 1]);
-  const ntpnNtpd = clean(row[ntpnIdx >= 0 ? ntpnIdx : row.length - 1]);
-  const makeRecord = (taxType: TaxType, dpp: unknown, tax: unknown, ntpn: unknown = ntpnNtpd) => {
-    const taxAmount = numberValue(tax);
-    const dppAmount = numberValue(dpp);
-    return {
-      id: `${sheet}-${idx}-${taxType}-${crypto.randomUUID()}`,
-      company,
-      period,
-      year: periodYear(period),
-      taxType,
-      dpp: dppAmount,
-      taxAmount,
-      ntpnNtpd: clean(ntpn),
-      status: paymentStatus(taxAmount, dppAmount, clean(ntpn), note),
-      note,
-      sourceSheet: sheet,
-      sourceRow: idx + 1,
-    } satisfies TaxTransaction;
+  const ketIdx = at("keterangan", "catatan", "note", "remark");
+  const perusahaan = clean(row[perusahaanIdx >= 0 ? perusahaanIdx : 0]) || "Perusahaan Belum Diisi";
+  const masaPajak = normalizePeriod(row[masaIdx >= 0 ? masaIdx : 1]);
+  const keterangan = clean(row[ketIdx >= 0 ? ketIdx : row.length - 1]);
+  const makeRecord = (jenisPajak: TaxType, dpp: unknown, pajak: unknown, ntpn: unknown) => {
+    const pajakTerhutang = numberValue(pajak);
+    const ntpnNtpd = clean(ntpn);
+    return { id: `${sheet}-${idx}-${jenisPajak}-${crypto.randomUUID()}`, perusahaan, masaPajak, tahun: periodYear(masaPajak), jenisPajak, dpp: numberValue(dpp), pajakTerhutang, ntpnNtpd, status: automaticStatus(pajakTerhutang, ntpnNtpd, keterangan), keterangan, sourceSheet: sheet, sourceRow: idx + 1 } satisfies TaxTransaction;
   };
-  if (headers && companyIdx >= 0) return [makeRecord(fallbackType ?? taxTypeFromText(row[typeIdx], sheet) ?? "PPh Pasal 21", row[dppIdx], row[taxIdx])];
-  if (/ppn/i.test(sheet)) {
-    const outputVat = numberValue(row[3]);
-    const inputVat = numberValue(row[5]);
-    return [{ ...makeRecord("PPN", row[2], row[8] ?? outputVat - inputVat, row[10]), outputVat, inputVat }];
-  }
-  return [
-    makeRecord("PPh Pasal 21", row[2], row[3], row[4]),
-    makeRecord("PPh Pasal 23", row[5], row[6], row[7]),
-    makeRecord("PPh Final Pasal 4 ayat 2", row[8], row[9], row[10]),
-    makeRecord("PB 1", row[11], row[12], row[13]),
-    makeRecord("PPh UMKM", row[14], row[15], row[16]),
-  ].filter((r) => r.dpp || r.taxAmount || r.ntpnNtpd || r.note);
+  if (headers && perusahaanIdx >= 0) return [makeRecord(taxTypeFromText(row[jenisIdx], sheet) ?? taxTypeFromText(row.join(" "), sheet) ?? "PPh Pasal 21", row[dppIdx], row[pajakIdx], row[ntpnIdx])];
+  return [makeRecord("PPh Pasal 21", row[2], row[3], row[4]), makeRecord("PPh Pasal 23", row[5], row[6], row[7]), makeRecord("PPh Final 4(2)", row[8], row[9], row[10]), makeRecord("PB1", row[11], row[12], row[13]), makeRecord("PPh UMKM", row[14], row[15], row[16])].filter((r) => r.dpp || r.pajakTerhutang || r.ntpnNtpd || r.keterangan);
 }
-
 function parseWorkbook(wb: XLSX.WorkBook): ParseResult {
   const errors: string[] = [];
   const sheetsRead: string[] = [];
@@ -173,66 +134,34 @@ function parseWorkbook(wb: XLSX.WorkBook): ParseResult {
     const aoa = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheet], { header: 1, blankrows: false });
     const headerRow = aoa.findIndex((row) => row.some((cell) => /perusahaan|company|masa|jenis pajak|dpp|ntpn|ntpd/i.test(clean(cell))));
     const headers = headerRow >= 0 ? aoa[headerRow].map(clean) : undefined;
-    const dataRows = aoa.slice(headerRow >= 0 ? headerRow + 1 : 1).filter(hasSignal);
-    const parsed = dataRows.flatMap((row, i) => rowToRecords(row, sheet, i + (headerRow >= 0 ? headerRow + 1 : 1), headers));
-    if (parsed.length) sheetsRead.push(sheet);
-    else errors.push(`Sheet "${sheet}" tidak menghasilkan transaksi. Pastikan ada kolom Perusahaan, Masa Pajak, Jenis Pajak, DPP, Nilai Pajak, dan NTPN/NTPD.`);
-    if (headers && !headers.some((h) => /nilai pajak|pajak terhutang|jumlah pajak|amount|ppn|pembayaran/i.test(h))) errors.push(`Sheet "${sheet}" tidak memiliki kolom nilai pajak yang dikenali.`);
+    const parsed = aoa.slice(headerRow >= 0 ? headerRow + 1 : 1).filter(hasSignal).flatMap((row, i) => rowToRecords(row, sheet, i + (headerRow >= 0 ? headerRow + 1 : 1), headers));
+    if (parsed.length) sheetsRead.push(sheet); else errors.push(`Sheet "${sheet}" tidak menghasilkan transaksi. Pastikan kolom Perusahaan, Masa Pajak, Jenis Pajak, DPP, Pajak Terhutang, dan NTPN/NTPD tersedia.`);
     return parsed;
   });
   if (!records.length) errors.push("Tidak ada data pajak yang berhasil dinormalisasi dari workbook.");
   return { records, errors, sheetsRead };
 }
-
-function rupiah(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value);
-}
-function shortRp(value: number) {
-  return new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
-}
-function statusTone(status: string) {
-  if (status === "Sudah ada NTPN/NTPD") return "success";
-  if (status === "Belum ada NTPN/NTPD" || status === "Data kosong") return "warning";
-  if (status === "Kompensasi lebih bayar") return "destructive";
-  return "secondary";
-}
-function groupSum<T extends string>(rows: TaxTransaction[], key: (row: TaxTransaction) => T) {
-  return Array.from(rows.reduce((m, r) => m.set(key(r), (m.get(key(r)) ?? 0) + r.taxAmount), new Map<T, number>())).map(([name, value]) => ({ name, value }));
-}
+function rupiah(value: number) { return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value || 0); }
+function plainNumber(value: number) { return new Intl.NumberFormat("id-ID").format(value || 0); }
+function statusTone(status: string) { if (status === "Terverifikasi") return "success"; if (status === "Belum Lengkap") return "warning"; if (status === "Lebih Bayar" || status === "Kompensasi") return "destructive"; return "secondary"; }
+function sum(rows: TaxTransaction[], type?: TaxType) { return rows.filter((r) => !type || r.jenisPajak === type).reduce((a, r) => a + r.pajakTerhutang, 0); }
+function dpp(rows: TaxTransaction[], types?: TaxType[]) { return rows.filter((r) => !types || types.includes(r.jenisPajak)).reduce((a, r) => a + r.dpp, 0); }
 
 export function TaxCoordinatorDashboard() {
   const [records, setRecords] = useState<TaxTransaction[]>([]);
-  const [page, setPage] = useState<Page>("summary");
-  const [filters, setFilters] = useState<Filters>({ year: ALL, period: ALL, company: ALL, taxType: ALL, status: ALL });
-  const [message, setMessage] = useState("Upload file Excel sumber pajak untuk membangun dashboard baru dari data workbook.");
+  const [page, setPage] = useState<Page>("dashboard");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [filters, setFilters] = useState<Filters>({ tahun: ALL, masaPajak: ALL, perusahaan: ALL, jenisPajak: ALL, status: ALL, sourceSheet: ALL, search: "" });
+  const [message, setMessage] = useState("Belum ada data. Silakan upload Excel untuk membangun dashboard perpajakan.");
+  const [error, setError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => setRecords(JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]") as TaxTransaction[]), []);
   useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(records)), [records]);
-  const filtered = useMemo(() => records.filter((r) => (filters.year === ALL || r.year === filters.year) && (filters.period === ALL || r.period === filters.period) && (filters.company === ALL || r.company === filters.company) && (filters.taxType === ALL || r.taxType === filters.taxType) && (filters.status === ALL || r.status === filters.status)), [records, filters]);
-  const periods = Array.from(new Set(records.map((r) => r.period))).sort((a, b) => periodSort(a) - periodSort(b));
-  const years = Array.from(new Set(records.map((r) => r.year))).sort();
-  const companies = Array.from(new Set(records.map((r) => r.company))).sort();
-  const periodText = periods.length ? `${periods[0]} sampai ${periods.at(-1)}` : "Jan-26 sampai bulan terakhir di Excel";
-  const totals = {
-    dpp: filtered.reduce((a, r) => a + r.dpp, 0),
-    tax: filtered.reduce((a, r) => a + r.taxAmount, 0),
-    pph: filtered.filter((r) => PPH_TYPES.includes(r.taxType)).reduce((a, r) => a + r.taxAmount, 0),
-    ppn: filtered.filter((r) => r.taxType === "PPN").reduce((a, r) => a + r.taxAmount, 0),
-    pb1: filtered.filter((r) => r.taxType === "PB 1").reduce((a, r) => a + r.taxAmount, 0),
-  };
-  const taxByType = TAX_TYPES.map((type) => ({ name: type, value: filtered.filter((r) => r.taxType === type).reduce((a, r) => a + r.taxAmount, 0) }));
-  const trend = periods.map((period) => ({ period, ...Object.fromEntries(TAX_TYPES.map((type) => [type, filtered.filter((r) => r.period === period && r.taxType === type).reduce((a, r) => a + r.taxAmount, 0)])) }));
-  const byCompany = groupSum(filtered, (r) => r.company).sort((a, b) => b.value - a.value).slice(0, 10);
-  const statusData = groupSum(filtered, (r) => r.status);
-  const alerts = [
-    ...filtered.filter((r) => r.taxAmount === 0).slice(0, 3).map((r) => `Nilai pajak 0: ${r.company} ${r.period} ${r.taxType}`),
-    ...filtered.filter((r) => r.taxAmount < 0).slice(0, 3).map((r) => `Pajak negatif/LB: ${r.company} ${r.period} ${r.taxType}`),
-    ...filtered.filter((r) => !r.ntpnNtpd).slice(0, 3).map((r) => `NTPN/NTPD kosong: ${r.company} ${r.period} ${r.taxType}`),
-    totals.tax ? `Perusahaan pajak tertinggi: ${byCompany[0]?.name ?? "-"}` : "Belum ada data transaksi",
-    totals.tax ? `Jenis pajak terbesar: ${taxByType.toSorted((a, b) => b.value - a.value)[0]?.name}` : "Upload Excel untuk melihat highlight otomatis",
-  ];
-  const detailRows = page === "pph" ? filtered.filter((r) => PPH_TYPES.includes(r.taxType)) : page === "ppn" ? filtered.filter((r) => r.taxType === "PPN") : page === "pb1" ? filtered.filter((r) => r.taxType === "PB 1") : filtered;
+
+  const baseRows = useMemo(() => pageMeta[page].types ? records.filter((r) => pageMeta[page].types?.includes(r.jenisPajak)) : records, [page, records]);
+  const filtered = useMemo(() => baseRows.filter((r) => (filters.tahun === ALL || r.tahun === filters.tahun) && (filters.masaPajak === ALL || r.masaPajak === filters.masaPajak) && (filters.perusahaan === ALL || r.perusahaan === filters.perusahaan) && (filters.jenisPajak === ALL || r.jenisPajak === filters.jenisPajak) && (filters.status === ALL || r.status === filters.status) && (filters.sourceSheet === ALL || r.sourceSheet === filters.sourceSheet) && (!filters.search || `${r.perusahaan} ${r.ntpnNtpd} ${r.jenisPajak} ${r.keterangan}`.toLowerCase().includes(filters.search.toLowerCase()))), [baseRows, filters]);
+  const options = (key: keyof TaxTransaction) => Array.from(new Set(records.map((r) => String(r[key])))).filter(Boolean).sort((a, b) => key === "masaPajak" ? periodSort(a) - periodSort(b) : a.localeCompare(b));
+  const meta = pageMeta[page];
 
   function updateFilter(key: keyof Filters, value: string) { setFilters((cur) => ({ ...cur, [key]: value })); }
   function importExcel(event: ChangeEvent<HTMLInputElement>) {
@@ -240,56 +169,51 @@ export function TaxCoordinatorDashboard() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const result = parseWorkbook(XLSX.read(reader.result, { type: "array", cellDates: false }));
-      setRecords(result.records);
-      const totalTax = result.records.reduce((sum, row) => sum + row.taxAmount, 0);
-      const readableSheets = result.sheetsRead.length ? result.sheetsRead.join(", ") : "tidak ada";
-      const warning = result.records.length && totalTax === 0 ? ` Peringatan: KPI masih 0 karena semua nilai pajak terbaca 0; cek mapping kolom/sheet. ${result.errors.join(" ")}` : result.errors.length ? ` Catatan: ${result.errors.join(" ")}` : "";
-      setMessage(`Berhasil normalisasi ${result.records.length} transaksi pajak dari ${file.name}. Sheet terbaca: ${readableSheets}.${warning}`);
+      try {
+        const result = parseWorkbook(XLSX.read(reader.result, { type: "array", cellDates: false }));
+        setRecords(result.records);
+        setError(result.errors.join(" "));
+        setMessage(`Berhasil normalisasi ${result.records.length} baris data dari ${file.name}. Sheet terbaca: ${result.sheetsRead.join(", ") || "tidak ada"}.`);
+      } catch (err) { setError(err instanceof Error ? err.message : "Excel gagal dibaca."); }
     };
     reader.readAsArrayBuffer(file);
     event.target.value = "";
   }
-  function exportCsv() {
-    const rows = filtered.map((r) => ({ Perusahaan: r.company, "Masa Pajak": r.period, "Jenis Pajak": r.taxType, DPP: r.dpp, Pajak: r.taxAmount, "NTPN/NTPD": r.ntpnNtpd, Status: r.status, Keterangan: r.note, Sheet: r.sourceSheet }));
-    const keys = Object.keys(rows[0] ?? { Info: "Tidak ada data" });
-    const csv = [keys.join(","), ...rows.map((r) => keys.map((k) => `"${String((r as Record<string, unknown>)[k] ?? "").replace(/"/g, '""')}"`).join(","))].join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = "normalized-tax-dashboard.csv";
-    a.click();
-  }
 
-  return <main className="min-h-screen bg-slate-100 text-slate-900">
-    <section className="border-b bg-gradient-to-br from-slate-950 via-blue-950 to-slate-900 px-6 py-8 text-white">
-      <div className="mx-auto max-w-7xl space-y-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div><p className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]"><Database className="h-4 w-4" /> Summary All Tax Payment</p><h1 className="text-4xl font-black">Dashboard Monitoring Pembayaran Pajak</h1><p className="mt-2 text-blue-100">Ringkasan Pembayaran Pajak Seluruh Perusahaan • Periode data: {periodText}</p></div>
-          <div className="flex flex-wrap gap-2"><Button onClick={() => inputRef.current?.click()}><Upload className="h-4 w-4" /> Upload Excel</Button><Button variant="outline" className="bg-white text-slate-950 hover:bg-slate-100" onClick={exportCsv}><Download className="h-4 w-4" /> Export CSV</Button><Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" /></div>
-        </div>
-        <div className="grid gap-3 rounded-2xl bg-white/10 p-4 backdrop-blur md:grid-cols-5"><Filter className="hidden h-5 w-5 self-center text-blue-100 md:block" />{[["year", "Tahun", years], ["period", "Masa Pajak", periods], ["company", "Perusahaan", companies], ["taxType", "Jenis Pajak", TAX_TYPES], ["status", "Status NTPN/NTPD", ["Sudah ada NTPN/NTPD", "Belum ada NTPN/NTPD", "Kompensasi lebih bayar", "Data kosong", "Nilai pajak 0"]]].map(([key, label, values]) => <label key={key as string} className="space-y-1 text-xs font-bold uppercase tracking-wide text-blue-100"><span>{label as string}</span><Select value={filters[key as keyof Filters]} onChange={(e) => updateFilter(key as keyof Filters, e.target.value)}><option>{ALL}</option>{(values as readonly string[]).map((v) => <option key={v}>{v}</option>)}</Select></label>)}</div>
-      </div>
-    </section>
-    <section className="mx-auto max-w-7xl space-y-6 p-6">
-      <div className="flex flex-wrap gap-2">{[["summary", "Halaman 1 — Summary"], ["pph", "Halaman 2 — Detail PPh"], ["ppn", "Halaman 3 — Detail PPN"], ["pb1", "Halaman 4 — Detail PB 1"], ["quality", "Halaman 5 — Data Quality"]].map(([id, label]) => <Button key={id} variant={page === id ? "default" : "outline"} onClick={() => setPage(id as Page)}>{label}</Button>)}</div>
-      <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm font-semibold text-blue-800"><FileSpreadsheet className="mr-2 inline h-4 w-4" />{message}</div>
-      {page === "summary" && <Summary totals={totals} filtered={filtered} taxByType={taxByType} trend={trend} byCompany={byCompany} statusData={statusData} alerts={alerts} />}
-      {page === "pph" && <Detail title="Detail PPh" rows={detailRows} chartTypes={PPH_TYPES as TaxType[]} />}
-      {page === "ppn" && <Detail title="Detail PPN" rows={detailRows} chartTypes={["PPN"]} ppn />}
-      {page === "pb1" && <Detail title="Detail PB 1" rows={detailRows} chartTypes={["PB 1"]} />}
-      {page === "quality" && <Quality rows={filtered} periods={periods} companies={companies} />}
-    </section>
+  return <main className="min-h-screen bg-[#EEF3F8] text-slate-950">
+    <Sidebar page={page} setPage={setPage} open={drawerOpen} setOpen={setDrawerOpen} />
+    <div className="min-h-screen lg:pl-72">
+      <header className="sticky top-0 z-20 border-b border-[#D8E0EA] bg-[#EEF3F8]/90 px-4 py-3 backdrop-blur lg:hidden"><Button variant="outline" onClick={() => setDrawerOpen(true)}><Menu className="h-4 w-4" /> Menu</Button></header>
+      <section className="space-y-6 p-4 sm:p-6 xl:p-8">
+        <div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1><p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p></div>
+        <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: options("tahun"), masaPajak: options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES, sourceSheet: options("sourceSheet") }} onUpload={() => inputRef.current?.click()} />
+        <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
+        <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{message}{!records.length && " KPI akan menampilkan 0 sampai data tersedia."}</div>
+        {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
+        {page === "documents" ? <Documents rows={filtered} /> : <><KpiGrid items={buildKpis(page, filtered)} /><TransactionTable rows={filtered} title={page === "dashboard" ? "Resume Pembayaran Pajak" : `Tabel detail ${meta.title}`} /></>}
+      </section>
+    </div>
   </main>;
 }
 
-function Kpi({ label, value }: { label: string; value: string | number }) { return <Card><CardContent className="p-5"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 text-2xl font-black text-slate-950">{typeof value === "number" ? rupiah(value) : value}</p></CardContent></Card>; }
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) { return <Card><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="h-80">{children}</CardContent></Card>; }
-function Summary({ totals, filtered, taxByType, trend, byCompany, statusData, alerts }: { totals: { dpp: number; tax: number; pph: number; ppn: number; pb1: number }; filtered: TaxTransaction[]; taxByType: { name: string; value: number }[]; trend: Record<string, string | number>[]; byCompany: { name: string; value: number }[]; statusData: { name: string; value: number }[]; alerts: string[] }) {
-  return <><section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"><Kpi label="Total DPP seluruh pajak" value={totals.dpp} /><Kpi label="Total nilai pajak" value={totals.tax} /><Kpi label="Total PPh" value={totals.pph} /><Kpi label="Total PPN" value={totals.ppn} /><Kpi label="Total PB 1" value={totals.pb1} /><Kpi label="Jumlah perusahaan" value={new Set(filtered.map((r) => r.company)).size.toLocaleString("id-ID")} /><Kpi label="Jumlah transaksi pajak" value={filtered.length.toLocaleString("id-ID")} /><Kpi label="Jumlah NTPN/NTPD tersedia" value={filtered.filter((r) => r.status === "Sudah ada NTPN/NTPD").length.toLocaleString("id-ID")} /><Kpi label="Jumlah NTPN/NTPD kosong" value={filtered.filter((r) => r.status === "Belum ada NTPN/NTPD").length.toLocaleString("id-ID")} /><Kpi label="Kompensasi lebih bayar" value={filtered.filter((r) => r.status === "Kompensasi lebih bayar").length.toLocaleString("id-ID")} /></section>
-  <section className="grid gap-6 xl:grid-cols-2"><ChartCard title="Ringkasan Nilai Pajak per Jenis Pajak"><ResponsiveContainer><BarChart data={taxByType}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" interval={0} angle={-18} textAnchor="end" height={80} /><YAxis tickFormatter={(v) => shortRp(Number(v))} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Bar dataKey="value" name="Nilai Pajak" fill="#1d4ed8" /></BarChart></ResponsiveContainer></ChartCard><ChartCard title="Komposisi Pembayaran Pajak"><ResponsiveContainer><PieChart><Pie data={taxByType} dataKey="value" nameKey="name" outerRadius={110} label>{taxByType.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip formatter={(v) => rupiah(Number(v))} /><Legend /></PieChart></ResponsiveContainer></ChartCard></section>
-  <ChartCard title="Tren Pembayaran Pajak Bulanan"><ResponsiveContainer><LineChart data={trend}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="period" /><YAxis tickFormatter={(v) => shortRp(Number(v))} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Legend />{TAX_TYPES.map((type, i) => <Line key={type} type="monotone" dataKey={type} stroke={COLORS[i]} strokeWidth={2} />)}</LineChart></ResponsiveContainer></ChartCard>
-  <section className="grid gap-6 xl:grid-cols-3"><ChartCard title="Ranking Perusahaan"><ResponsiveContainer><BarChart data={byCompany} layout="vertical"><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" tickFormatter={(v) => shortRp(Number(v))} /><YAxis type="category" dataKey="name" width={170} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Bar dataKey="value" fill="#0f766e" /></BarChart></ResponsiveContainer></ChartCard><ChartCard title="Status NTPN / NTPD"><ResponsiveContainer><PieChart><Pie data={statusData} dataKey="value" nameKey="name" outerRadius={105} label>{statusData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer></ChartCard><Card><CardHeader><CardTitle>Alert / Highlight</CardTitle></CardHeader><CardContent className="space-y-3">{alerts.map((a) => <div key={a} className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm font-semibold text-orange-800"><AlertTriangle className="mr-2 inline h-4 w-4" />{a}</div>)}</CardContent></Card></section><TransactionTable title="Tabel Detail Ringkas" rows={filtered.slice(0, 100)} /></>;
+function Sidebar({ page, setPage, open, setOpen }: { page: Page; setPage: (page: Page) => void; open: boolean; setOpen: (open: boolean) => void }) {
+  return <aside className={cn("fixed inset-y-0 left-0 z-40 w-72 transform bg-[#020617] p-5 text-white shadow-2xl transition-transform lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
+    <div className="mb-8 flex items-center justify-between"><div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30"><Receipt className="h-6 w-6" /></div><div><p className="text-lg font-black">Tax Coordinator</p><p className="text-xs font-semibold text-slate-400">Dashboard Perpajakan</p></div></div><Button variant="ghost" size="icon" className="text-white lg:hidden" onClick={() => setOpen(false)}><X className="h-5 w-5" /></Button></div>
+    <nav className="space-y-2">{navItems.map(([id, Icon, label]) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition", page === id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white")}><Icon className="h-5 w-5" />{label}</button>)}</nav>
+  </aside>;
 }
-function Detail({ title, rows, chartTypes, ppn = false }: { title: string; rows: TaxTransaction[]; chartTypes: TaxType[]; ppn?: boolean }) { const trend = Array.from(new Set(rows.map((r) => r.period))).sort((a, b) => periodSort(a) - periodSort(b)).map((period) => ({ period, pajak: rows.filter((r) => r.period === period).reduce((a, r) => a + r.taxAmount, 0), keluaran: rows.filter((r) => r.period === period).reduce((a, r) => a + (r.outputVat ?? 0), 0), masukan: rows.filter((r) => r.period === period).reduce((a, r) => a + (r.inputVat ?? 0), 0) })); return <><section className="grid gap-4 md:grid-cols-4"><Kpi label="Total DPP" value={rows.reduce((a, r) => a + r.dpp, 0)} /><Kpi label={ppn ? "Kurang bayar / lebih bayar" : "Total Pajak"} value={rows.reduce((a, r) => a + r.taxAmount, 0)} /><Kpi label={ppn ? "Pajak keluaran" : "Jumlah NTPN/NTPD"} value={(ppn ? rows.reduce((a, r) => a + (r.outputVat ?? 0), 0) : rows.filter((r) => r.ntpnNtpd).length).toLocaleString("id-ID")} /><Kpi label={ppn ? "Pajak masukan" : "Transaksi"} value={(ppn ? rows.reduce((a, r) => a + (r.inputVat ?? 0), 0) : rows.length).toLocaleString("id-ID")} /></section><section className="grid gap-6 xl:grid-cols-2"><ChartCard title={`${title} — tren bulanan`}><ResponsiveContainer><LineChart data={trend}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="period" /><YAxis tickFormatter={(v) => shortRp(Number(v))} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Legend /><Line dataKey="pajak" stroke="#1d4ed8" />{ppn && <><Line dataKey="keluaran" stroke="#16a34a" /><Line dataKey="masukan" stroke="#f97316" /></>}</LineChart></ResponsiveContainer></ChartCard><ChartCard title={`${title} — perbandingan perusahaan`}><ResponsiveContainer><BarChart data={groupSum(rows, (r) => r.company).sort((a, b) => b.value - a.value)}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" hide /><YAxis tickFormatter={(v) => shortRp(Number(v))} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Bar dataKey="value" fill="#0f766e" /></BarChart></ResponsiveContainer></ChartCard></section><ChartCard title={`${title} — status pembayaran`}><ResponsiveContainer><BarChart data={groupSum(rows, (r) => r.status)}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="value" fill="#1d4ed8" /></BarChart></ResponsiveContainer></ChartCard><TransactionTable title={`Tabel detail ${chartTypes.join(", ")}`} rows={rows} /></>; }
-function Quality({ rows, periods, companies }: { rows: TaxTransaction[]; periods: string[]; companies: string[] }) { const issues = rows.filter((r) => !r.ntpnNtpd || r.taxAmount <= 0 || r.status === "Kompensasi lebih bayar" || !r.dpp || r.period === "-"); const missing = companies.flatMap((company) => periods.filter((period) => !rows.some((r) => r.company === company && r.period === period)).map((period) => ({ company, period }))).slice(0, 40); return <><section className="grid gap-4 md:grid-cols-3 xl:grid-cols-6"><Kpi label="NTPN/NTPD kosong" value={rows.filter((r) => !r.ntpnNtpd).length.toLocaleString("id-ID")} /><Kpi label="Pajak 0" value={rows.filter((r) => r.taxAmount === 0).length.toLocaleString("id-ID")} /><Kpi label="Pajak negatif / LB" value={rows.filter((r) => r.taxAmount < 0).length.toLocaleString("id-ID")} /><Kpi label="Kompensasi lebih bayar" value={rows.filter((r) => r.status === "Kompensasi lebih bayar").length.toLocaleString("id-ID")} /><Kpi label="DPP kosong" value={rows.filter((r) => !r.dpp).length.toLocaleString("id-ID")} /><Kpi label="Masa pajak kosong" value={rows.filter((r) => r.period === "-").length.toLocaleString("id-ID")} /></section><TransactionTable title="Data yang perlu dicek ulang oleh accounting" rows={issues} /><Card><CardHeader><CardTitle>Masa pajak / perusahaan belum lengkap</CardTitle><CardDescription>Pasangan perusahaan dan masa pajak yang belum memiliki transaksi pada data terfilter.</CardDescription></CardHeader><CardContent className="grid gap-2 md:grid-cols-2">{missing.map((m) => <div key={`${m.company}-${m.period}`} className="rounded-lg bg-slate-50 p-3 text-sm font-semibold"><AlertTriangle className="mr-2 inline h-4 w-4 text-orange-500" />{m.company} — {m.period}</div>)}</CardContent></Card></>; }
-function TransactionTable({ title, rows }: { title: string; rows: TaxTransaction[] }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{rows.length} transaksi pajak.</CardDescription></CardHeader><CardContent className="overflow-auto"><Table><TableHeader><TableRow>{["Perusahaan", "Masa pajak", "Jenis pajak", "DPP", "Pajak", "NTPN/NTPD", "Status", "Keterangan"].map((h) => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map((r) => <TableRow key={r.id}><TableCell className="min-w-56 font-semibold">{r.company}</TableCell><TableCell>{r.period}</TableCell><TableCell>{r.taxType}</TableCell><TableCell className={r.dpp < 0 ? "text-red-600" : ""}>{rupiah(r.dpp)}</TableCell><TableCell className={r.taxAmount < 0 ? "font-bold text-red-600" : ""}>{rupiah(r.taxAmount)}</TableCell><TableCell>{r.ntpnNtpd || "-"}</TableCell><TableCell><Badge variant={statusTone(r.status)}>{r.status === "Sudah ada NTPN/NTPD" && <CheckCircle2 className="mr-1 h-3 w-3" />}{r.status}</Badge></TableCell><TableCell className="min-w-72">{r.note || `${r.sourceSheet} baris ${r.sourceRow}`}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card>; }
+function FilterBar({ filters, updateFilter, options, onUpload }: { filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; options: { tahun: string[]; masaPajak: string[]; perusahaan: string[]; jenisPajak: readonly string[]; status: readonly string[]; sourceSheet: string[] }; onUpload: () => void }) {
+  const selects: [keyof Filters, string, readonly string[]][] = [["tahun", "Semua Tahun", options.tahun], ["masaPajak", "Semua Masa Pajak", options.masaPajak], ["perusahaan", "Semua Perusahaan", options.perusahaan], ["jenisPajak", "Semua Jenis Pajak", options.jenisPajak], ["status", "Semua Status", options.status], ["sourceSheet", "Semua Source", options.sourceSheet]];
+  return <Card className="rounded-3xl border-[#D8E0EA] shadow-sm"><CardContent className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-8">{selects.map(([key, placeholder, values]) => <Select key={key} value={filters[key]} onChange={(e) => updateFilter(key, e.target.value)} className="h-11 rounded-2xl bg-white"><option value={ALL}>{placeholder}</option>{values.map((v) => <option key={v} value={v}>{v}</option>)}</Select>)}<div className="relative xl:col-span-1"><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" /><Input value={filters.search} onChange={(e) => updateFilter("search", e.target.value)} placeholder="Cari perusahaan, NTPN, jenis pajak..." className="h-11 rounded-2xl bg-white pl-9" /></div><Button onClick={onUpload} className="h-11 rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Upload className="h-4 w-4" /> Upload Excel</Button></CardContent></Card>;
+}
+function buildKpis(page: Page, rows: TaxTransaction[]): KpiItem[] {
+  if (page === "ppn") return [{ label: "Total PPN Keluaran", value: sum(rows, "PPN Keluaran"), money: true }, { label: "Total PPN Masukan", value: sum(rows, "PPN Masukan"), money: true }, { label: "PM Tidak Dikreditkan", value: sum(rows, "PM Tidak Dikreditkan"), money: true }, { label: "Kurang Bayar/Lebih Bayar", value: sum(rows, "Pembayaran PPN"), money: true }, { label: "Total Pembayaran PPN", value: sum(rows, "Pembayaran PPN"), money: true }];
+  if (page === "pph21") return [{ label: "Total DPP PPh 21", value: dpp(rows), money: true }, { label: "Total PPh 21", value: sum(rows), money: true }, { label: "Jumlah transaksi", value: rows.length }, { label: "NTPN terisi", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "NTPN kosong", value: rows.filter((r) => !r.ntpnNtpd).length }];
+  if (page === "unifikasi") return [{ label: "Total PPh 23", value: sum(rows, "PPh Pasal 23"), money: true }, { label: "Total PPh Final 4(2)", value: sum(rows, "PPh Final 4(2)"), money: true }, { label: "Total DPP", value: dpp(rows), money: true }, { label: "Total pembayaran", value: sum(rows), money: true }, { label: "NTPN terisi", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "NTPN kosong", value: rows.filter((r) => !r.ntpnNtpd).length }];
+  if (page === "pb1") return [{ label: "Total DPP PB1", value: dpp(rows), money: true }, { label: "Total PB1", value: sum(rows), money: true }, { label: "Jumlah NTPD", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "NTPD kosong", value: rows.filter((r) => !r.ntpnNtpd).length }];
+  if (page === "umkm") return [{ label: "Total DPP UMKM", value: dpp(rows), money: true }, { label: "Total PPh UMKM", value: sum(rows), money: true }, { label: "Jumlah transaksi", value: rows.length }, { label: "NTPN terisi", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "NTPN kosong", value: rows.filter((r) => !r.ntpnNtpd).length }];
+  return [{ label: "Total PPN Keluaran", value: sum(rows, "PPN Keluaran"), money: true }, { label: "Total PPN Masukan", value: sum(rows, "PPN Masukan"), money: true }, { label: "Total PM Tidak Dikreditkan", value: sum(rows, "PM Tidak Dikreditkan"), money: true }, { label: "Total Pembayaran PPN", value: sum(rows, "Pembayaran PPN"), money: true }, { label: "Total PPh Pasal 21", value: sum(rows, "PPh Pasal 21"), money: true }, { label: "Total PPh Pasal 23", value: sum(rows, "PPh Pasal 23"), money: true }, { label: "Total PPh Final 4(2)", value: sum(rows, "PPh Final 4(2)"), money: true }, { label: "Total PB1", value: sum(rows, "PB1"), money: true }, { label: "Total PPh UMKM", value: sum(rows, "PPh UMKM"), money: true }, { label: "Total seluruh pembayaran pajak", value: sum(rows), money: true }, { label: "Jumlah perusahaan", value: new Set(rows.map((r) => r.perusahaan)).size }, { label: "Jumlah masa pajak", value: new Set(rows.map((r) => r.masaPajak)).size }, { label: "Jumlah NTPN/NTPD terisi", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "Belum memiliki NTPN/NTPD", value: rows.filter((r) => !r.ntpnNtpd).length }];
+}
+function KpiGrid({ items }: { items: KpiItem[] }) { return <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{items.map((item) => <Card key={item.label} className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardContent className="p-5"><p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">{item.label}</p><p className="mt-3 text-2xl font-black text-slate-950">{item.money ? rupiah(item.value) : plainNumber(item.value)}</p></CardContent></Card>)}</section>; }
+function TransactionTable({ title, rows }: { title: string; rows: TaxTransaction[] }) { return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{rows.length} baris data.</CardDescription></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Perusahaan", "Masa Pajak", "Jenis Pajak", "DPP", "Pajak Terhutang", "NTPN/NTPD", "Status", "Keterangan"].map((h) => <TableHead key={h} className="text-xs uppercase text-slate-500">{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.length ? rows.map((r) => <TableRow key={r.id} className="hover:bg-slate-50"><TableCell className="min-w-56 font-semibold">{r.perusahaan}</TableCell><TableCell>{r.masaPajak}</TableCell><TableCell>{r.jenisPajak}</TableCell><TableCell>{rupiah(r.dpp)}</TableCell><TableCell className={r.pajakTerhutang < 0 ? "font-bold text-red-600" : ""}>{rupiah(r.pajakTerhutang)}</TableCell><TableCell>{r.ntpnNtpd || "-"}</TableCell><TableCell><Badge variant={statusTone(r.status)}>{r.status === "Terverifikasi" && <CheckCircle2 className="mr-1 h-3 w-3" />}{r.status}</Badge></TableCell><TableCell className="min-w-72">{r.keterangan || `${r.sourceSheet} baris ${r.sourceRow}`}</TableCell></TableRow>) : <TableRow><TableCell colSpan={8} className="h-28 text-center text-sm font-semibold text-slate-500">Belum ada data. Silakan upload Excel.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>; }
+function Documents({ rows }: { rows: TaxTransaction[] }) { const docs = rows.filter((r) => r.ntpnNtpd || /pdf|bukti|file|dokumen|lampiran/i.test(r.keterangan)); return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Dokumen Pajak</CardTitle><CardDescription>{docs.length} dokumen/rujukan bukti bayar terdeteksi dari data terfilter.</CardDescription></CardHeader><CardContent className="space-y-3">{docs.length ? docs.map((r) => <div key={r.id} className="flex flex-col gap-2 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"><div><p className="font-bold text-slate-950">{r.perusahaan} — {r.jenisPajak}</p><p className="text-sm text-slate-500">{r.masaPajak} • {r.sourceSheet} baris {r.sourceRow} • {r.keterangan || "Bukti bayar / NTPN-NTPD"}</p></div><Badge variant={r.ntpnNtpd ? "success" : "secondary"}>{r.ntpnNtpd || "Dokumen pendukung"}</Badge></div>) : <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center font-semibold text-slate-500">Belum ada dokumen pajak. Upload Excel dengan NTPN/NTPD, bukti bayar, PDF, atau file pendukung.</div>}</CardContent></Card>; }
