@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { Building2, CheckCircle2, FileArchive, FileSpreadsheet, Home, Menu, Receipt, Search, Upload, X } from "lucide-react";
+import { Building2, CheckCircle2, Download, Edit3, FileArchive, FileSpreadsheet, Home, Menu, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,9 +12,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 
 const STORAGE_KEY = "tax-coordinator-normalized-v2";
+const MANUAL_STORAGE_KEY = "taxManualEntries";
 const ALL = "__all__";
-const TAX_TYPES = ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN", "PPh Pasal 21", "PPh Pasal 23", "PPh Final 4(2)", "PB1", "PPh UMKM"] as const;
-const STATUSES = ["Terverifikasi", "Belum Lengkap", "Nihil", "Lebih Bayar", "Kompensasi"] as const;
+const TAX_TYPES = ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN", "PPN", "PPh Pasal 21", "PPh Pasal 23", "PPh Final 4(2)", "PB1", "PPh UMKM"] as const;
+const STATUSES = ["Terverifikasi", "Belum Lengkap", "Nihil", "Lebih Bayar", "Kompensasi", "Sudah ada NTPN/NTPD", "Belum ada NTPN/NTPD", "Nilai pajak 0", "Data kosong"] as const;
+const PPH_TYPES: TaxType[] = ["PPh Pasal 21", "PPh Pasal 23", "PPh Final 4(2)", "PPh UMKM"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 
 type TaxType = (typeof TAX_TYPES)[number];
@@ -31,10 +33,15 @@ type TaxTransaction = {
   dpp: number;
   pajakTerhutang: number;
   ntpnNtpd: string;
-  status: Status;
+  tanggalBayar?: string;
+  status: Status | string;
+  statusAuto?: string;
   keterangan: string;
+  sourceData?: "Excel Import" | "Manual Input";
   sourceSheet: string;
   sourceRow: number;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 type Filters = { tahun: string; masaPajak: string; perusahaan: string; jenisPajak: string; status: string; sourceSheet: string; search: string };
@@ -43,7 +50,7 @@ type KpiItem = { label: string; value: number; money?: boolean };
 
 const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[] }> = {
   dashboard: { title: "Dashboard", subtitle: "Dashboard utama berisi resume; detail data berada di sidebar jenis pajak." },
-  ppn: { title: "PPN", subtitle: "Monitoring PPN keluaran, masukan, PM tidak dikreditkan, dan pembayaran PPN.", types: ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN"] },
+  ppn: { title: "PPN", subtitle: "Monitoring PPN keluaran, masukan, PM tidak dikreditkan, dan pembayaran PPN.", types: ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN", "PPN"] },
   pph21: { title: "PPh Pasal 21", subtitle: "Detail DPP, pajak terhutang, dan kelengkapan NTPN PPh Pasal 21.", types: ["PPh Pasal 21"] },
   unifikasi: { title: "PPh Unifikasi", subtitle: "Gabungan PPh Pasal 23 dan PPh Final 4(2).", types: ["PPh Pasal 23", "PPh Final 4(2)"] },
   pb1: { title: "PB1", subtitle: "Detail PB1 dan status NTPD pembayaran pajak daerah.", types: ["PB1"] },
@@ -98,12 +105,21 @@ function taxTypeFromText(value: unknown, sheet = ""): TaxType | undefined {
   if (/21/.test(text)) return "PPh Pasal 21";
   return undefined;
 }
-function automaticStatus(pajak: number, ntpnNtpd: string, keterangan: string): Status {
+function automaticStatus(pajak: number, ntpnNtpd: string, keterangan: string, dppValue?: number): string {
   const text = `${keterangan} ${ntpnNtpd}`.toLowerCase();
-  if (/kompensasi|lebih bayar/.test(text)) return "Kompensasi";
-  if (pajak < 0) return "Lebih Bayar";
-  if (pajak === 0) return "Nihil";
-  return clean(ntpnNtpd) ? "Terverifikasi" : "Belum Lengkap";
+  if ((dppValue === undefined || dppValue === 0) && pajak === 0 && !clean(ntpnNtpd) && !clean(keterangan)) return "Data kosong";
+  if (/kompensasi|lebih bayar/.test(text)) return "Kompensasi lebih bayar";
+  if (pajak < 0) return "Lebih bayar";
+  if (pajak === 0) return "Nilai pajak 0";
+  return clean(ntpnNtpd) ? "Sudah ada NTPN/NTPD" : "Belum ada NTPN/NTPD";
+}
+function displayStatus(auto: string): Status | string {
+  if (auto === "Sudah ada NTPN/NTPD") return "Terverifikasi";
+  if (auto === "Belum ada NTPN/NTPD") return "Belum Lengkap";
+  if (auto === "Nilai pajak 0") return "Nihil";
+  if (auto === "Lebih bayar") return "Lebih Bayar";
+  if (auto === "Kompensasi lebih bayar") return "Kompensasi";
+  return auto;
 }
 function hasSignal(row: unknown[]) { return row.some((cell) => clean(cell)) && (row.some((cell) => numberValue(cell) !== 0) || row.some((cell) => /ntpn|ntpd|kompensasi|lebih bayar|pph|ppn|pb\s*1/i.test(clean(cell)))); }
 function rowToRecords(row: unknown[], sheet: string, idx: number, headers?: string[]) {
@@ -122,7 +138,8 @@ function rowToRecords(row: unknown[], sheet: string, idx: number, headers?: stri
   const makeRecord = (jenisPajak: TaxType, dpp: unknown, pajak: unknown, ntpn: unknown) => {
     const pajakTerhutang = numberValue(pajak);
     const ntpnNtpd = clean(ntpn);
-    return { id: `${sheet}-${idx}-${jenisPajak}-${crypto.randomUUID()}`, perusahaan, masaPajak, tahun: periodYear(masaPajak), jenisPajak, dpp: numberValue(dpp), pajakTerhutang, ntpnNtpd, status: automaticStatus(pajakTerhutang, ntpnNtpd, keterangan), keterangan, sourceSheet: sheet, sourceRow: idx + 1 } satisfies TaxTransaction;
+    const dppNumber = numberValue(dpp); const statusAuto = automaticStatus(pajakTerhutang, ntpnNtpd, keterangan, dppNumber);
+    return { id: `${sheet}-${idx}-${jenisPajak}-${crypto.randomUUID()}`, perusahaan, masaPajak, tahun: periodYear(masaPajak), jenisPajak, dpp: dppNumber, pajakTerhutang, ntpnNtpd, status: displayStatus(statusAuto), statusAuto, keterangan, sourceData: "Excel Import", sourceSheet: sheet, sourceRow: idx + 1 } satisfies TaxTransaction;
   };
   if (headers && perusahaanIdx >= 0) return [makeRecord(taxTypeFromText(row[jenisIdx], sheet) ?? taxTypeFromText(row.join(" "), sheet) ?? "PPh Pasal 21", row[dppIdx], row[pajakIdx], row[ntpnIdx])];
   return [makeRecord("PPh Pasal 21", row[2], row[3], row[4]), makeRecord("PPh Pasal 23", row[5], row[6], row[7]), makeRecord("PPh Final 4(2)", row[8], row[9], row[10]), makeRecord("PB1", row[11], row[12], row[13]), makeRecord("PPh UMKM", row[14], row[15], row[16])].filter((r) => r.dpp || r.pajakTerhutang || r.ntpnNtpd || r.keterangan);
@@ -143,41 +160,70 @@ function parseWorkbook(wb: XLSX.WorkBook): ParseResult {
 }
 function rupiah(value: number) { return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value || 0); }
 function plainNumber(value: number) { return new Intl.NumberFormat("id-ID").format(value || 0); }
-function statusTone(status: string) { if (status === "Terverifikasi") return "success"; if (status === "Belum Lengkap") return "warning"; if (status === "Lebih Bayar" || status === "Kompensasi") return "destructive"; return "secondary"; }
+function statusTone(status: string) { if (status === "Terverifikasi" || status === "Sudah ada NTPN/NTPD") return "success"; if (status === "Belum Lengkap" || status === "Belum ada NTPN/NTPD" || status === "Data kosong") return "warning"; if (status === "Lebih Bayar" || status === "Kompensasi" || status === "Lebih bayar" || status === "Kompensasi lebih bayar") return "destructive"; return "secondary"; }
 function sum(rows: TaxTransaction[], type?: TaxType) { return rows.filter((r) => !type || r.jenisPajak === type).reduce((a, r) => a + r.pajakTerhutang, 0); }
 function dpp(rows: TaxTransaction[], types?: TaxType[]) { return rows.filter((r) => !types || types.includes(r.jenisPajak)).reduce((a, r) => a + r.dpp, 0); }
 
+type ManualForm = { id?: string; perusahaan: string; tahun: string; masaPajak: string; jenisPajak: TaxType; dpp: string; pajak: string; ntpnNtpd: string; tanggalBayar: string; status: string; keterangan: string; ppnKeluaran: string; ppnMasukan: string; pmTidakDikreditkan: string; totalPembayaranPpn: string };
+const emptyManualForm = (page: Page): ManualForm => ({ id: undefined, perusahaan: "", tahun: String(new Date().getFullYear()), masaPajak: "", jenisPajak: page === "pb1" ? "PB1" : page === "ppn" ? "PPN" : page === "umkm" ? "PPh UMKM" : page === "unifikasi" ? "PPh Pasal 23" : "PPh Pasal 21", dpp: "", pajak: "", ntpnNtpd: "", tanggalBayar: "", status: "", keterangan: "", ppnKeluaran: "", ppnMasukan: "", pmTidakDikreditkan: "", totalPembayaranPpn: "" });
+function manualButtonLabel(page: Page) { if (page === "dashboard") return "+ Tambah Data Pajak Manual"; if (page === "ppn") return "+ Tambah Data PPN"; if (page === "pb1") return "+ Tambah Data PB 1"; return "+ Tambah Data PPh"; }
+function isManualPage(page: Page) { return page !== "documents"; }
+function normalizeManualRecord(form: ManualForm): TaxTransaction {
+  const isPpn = form.jenisPajak === "PPN";
+  const dppNumber = isPpn ? numberValue(form.ppnKeluaran) : numberValue(form.dpp);
+  const computedPpn = numberValue(form.ppnKeluaran) - numberValue(form.ppnMasukan) + numberValue(form.pmTidakDikreditkan);
+  const pajakTerhutang = isPpn ? (clean(form.totalPembayaranPpn) ? numberValue(form.totalPembayaranPpn) : computedPpn) : numberValue(form.pajak);
+  const statusAuto = automaticStatus(pajakTerhutang, form.ntpnNtpd, form.keterangan, dppNumber);
+  const now = new Date().toISOString();
+  return { id: form.id || `manual-${crypto.randomUUID()}`, perusahaan: clean(form.perusahaan), tahun: clean(form.tahun), masaPajak: clean(form.masaPajak), jenisPajak: form.jenisPajak, dpp: dppNumber, pajakTerhutang, ntpnNtpd: clean(form.ntpnNtpd), tanggalBayar: form.tanggalBayar, status: clean(form.status) || displayStatus(statusAuto), statusAuto, keterangan: clean(form.keterangan) || (isPpn ? `PPN Keluaran ${rupiah(numberValue(form.ppnKeluaran))}; PPN Masukan ${rupiah(numberValue(form.ppnMasukan))}; PM Tidak Dikreditkan ${rupiah(numberValue(form.pmTidakDikreditkan))}` : ""), sourceData: "Manual Input", sourceSheet: "Manual Input", sourceRow: 0, createdAt: now, updatedAt: now };
+}
+function validateManualForm(form: ManualForm) {
+  const errors: Record<string, string> = {};
+  if (!clean(form.perusahaan)) errors.perusahaan = "Perusahaan wajib diisi.";
+  if (!clean(form.tahun)) errors.tahun = "Tahun wajib diisi.";
+  if (!clean(form.masaPajak)) errors.masaPajak = "Masa Pajak wajib diisi.";
+  if (!clean(form.jenisPajak)) errors.jenisPajak = "Jenis Pajak wajib diisi.";
+  const numericFields = form.jenisPajak === "PPN" ? [["ppnKeluaran", form.ppnKeluaran], ["ppnMasukan", form.ppnMasukan], ["pmTidakDikreditkan", form.pmTidakDikreditkan], ["totalPembayaranPpn", form.totalPembayaranPpn]] : [["dpp", form.dpp], ["pajak", form.pajak]];
+  numericFields.forEach(([key, value]) => { const raw = clean(value); if (raw && (!/[0-9]/.test(raw) || /[^0-9.,()\-\sRp]/i.test(raw))) errors[key] = "Field harus angka."; });
+  return errors;
+}
+function toCsv(rows: TaxTransaction[]) {
+  const headers = ["id", "perusahaan", "tahun", "masaPajak", "jenisPajak", "dpp", "pajak", "ntpnNtpd", "tanggalBayar", "status", "statusAuto", "keterangan", "sourceData", "sourceSheet", "createdAt", "updatedAt"];
+  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  return [headers.join(","), ...rows.map((r) => headers.map((h) => esc(h === "pajak" ? r.pajakTerhutang : r[h as keyof TaxTransaction])).join(","))].join("\n");
+}
+
 export function TaxCoordinatorDashboard() {
-  const [records, setRecords] = useState<TaxTransaction[]>([]);
+  const [excelRecords, setExcelRecords] = useState<TaxTransaction[]>([]);
+  const [manualRecords, setManualRecords] = useState<TaxTransaction[]>([]);
+  const records = useMemo(() => [...excelRecords.map((r) => ({ ...r, sourceData: r.sourceData || "Excel Import" as const })), ...manualRecords], [excelRecords, manualRecords]);
   const [page, setPage] = useState<Page>("dashboard");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [filters, setFilters] = useState<Filters>({ tahun: ALL, masaPajak: ALL, perusahaan: ALL, jenisPajak: ALL, status: ALL, sourceSheet: ALL, search: "" });
-  const [message, setMessage] = useState("Belum ada data. Silakan upload Excel untuk membangun dashboard perpajakan.");
+  const [message, setMessage] = useState("Belum ada data. Upload Excel atau tambahkan data manual.");
   const [error, setError] = useState("");
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form, setForm] = useState<ManualForm>(emptyManualForm("dashboard"));
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => setRecords(JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]") as TaxTransaction[]), []);
-  useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(records)), [records]);
+  useEffect(() => { setExcelRecords(JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]") as TaxTransaction[]); setManualRecords(JSON.parse(localStorage.getItem(MANUAL_STORAGE_KEY) || "[]") as TaxTransaction[]); }, []);
+  useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(excelRecords)), [excelRecords]);
+  useEffect(() => localStorage.setItem(MANUAL_STORAGE_KEY, JSON.stringify(manualRecords)), [manualRecords]);
 
   const baseRows = useMemo(() => pageMeta[page].types ? records.filter((r) => pageMeta[page].types?.includes(r.jenisPajak)) : records, [page, records]);
   const filtered = useMemo(() => baseRows.filter((r) => (filters.tahun === ALL || r.tahun === filters.tahun) && (filters.masaPajak === ALL || r.masaPajak === filters.masaPajak) && (filters.perusahaan === ALL || r.perusahaan === filters.perusahaan) && (filters.jenisPajak === ALL || r.jenisPajak === filters.jenisPajak) && (filters.status === ALL || r.status === filters.status) && (filters.sourceSheet === ALL || r.sourceSheet === filters.sourceSheet) && (!filters.search || `${r.perusahaan} ${r.ntpnNtpd} ${r.jenisPajak} ${r.keterangan}`.toLowerCase().includes(filters.search.toLowerCase()))), [baseRows, filters]);
-  const options = (key: keyof TaxTransaction) => Array.from(new Set(records.map((r) => String(r[key])))).filter(Boolean).sort((a, b) => key === "masaPajak" ? periodSort(a) - periodSort(b) : a.localeCompare(b));
+  const options = (key: keyof TaxTransaction) => Array.from(new Set(records.map((r) => String(r[key] ?? "")))).filter(Boolean).sort((a, b) => key === "masaPajak" ? periodSort(a) - periodSort(b) : a.localeCompare(b));
   const meta = pageMeta[page];
 
   function updateFilter(key: keyof Filters, value: string) { setFilters((cur) => ({ ...cur, [key]: value })); }
+  function openManual(entry?: TaxTransaction) { setFormErrors({}); setForm(entry ? { ...emptyManualForm(page), id: entry.id, perusahaan: entry.perusahaan, tahun: entry.tahun, masaPajak: entry.masaPajak, jenisPajak: entry.jenisPajak, dpp: String(entry.dpp), pajak: String(entry.pajakTerhutang), ntpnNtpd: entry.ntpnNtpd, tanggalBayar: entry.tanggalBayar || "", status: entry.status, keterangan: entry.keterangan, ppnKeluaran: entry.jenisPajak === "PPN" ? String(entry.dpp) : "", ppnMasukan: "", pmTidakDikreditkan: "", totalPembayaranPpn: entry.jenisPajak === "PPN" ? String(entry.pajakTerhutang) : "" } : emptyManualForm(page)); setModalOpen(true); }
+  function saveManual() { const errors = validateManualForm(form); setFormErrors(errors); if (Object.keys(errors).length) return; const next = normalizeManualRecord(form); setManualRecords((cur) => form.id ? cur.map((r) => r.id === form.id ? { ...next, createdAt: r.createdAt, updatedAt: new Date().toISOString() } : r) : [...cur, next]); setMessage("Data berhasil ditambahkan."); setModalOpen(false); }
+  function deleteManual(id: string) { if (confirm("Apakah Anda yakin ingin menghapus data ini?")) setManualRecords((cur) => cur.filter((r) => r.id !== id)); }
+  function exportCsv() { const blob = new Blob([toCsv(filtered)], { type: "text/csv;charset=utf-8" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = "tax-dashboard-export.csv"; a.click(); URL.revokeObjectURL(url); }
   function importExcel(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const result = parseWorkbook(XLSX.read(reader.result, { type: "array", cellDates: false }));
-        setRecords(result.records);
-        setError(result.errors.join(" "));
-        setMessage(`Berhasil normalisasi ${result.records.length} baris data dari ${file.name}. Sheet terbaca: ${result.sheetsRead.join(", ") || "tidak ada"}.`);
-      } catch (err) { setError(err instanceof Error ? err.message : "Excel gagal dibaca."); }
-    };
-    reader.readAsArrayBuffer(file);
-    event.target.value = "";
+    const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader();
+    reader.onload = () => { try { const result = parseWorkbook(XLSX.read(reader.result, { type: "array", cellDates: false })); setExcelRecords(result.records); setError(result.errors.join(" ")); setMessage(`Berhasil normalisasi ${result.records.length} baris data dari ${file.name}. Sheet terbaca: ${result.sheetsRead.join(", ") || "tidak ada"}.`); } catch (err) { setError(err instanceof Error ? err.message : "Excel gagal dibaca."); } };
+    reader.readAsArrayBuffer(file); event.target.value = "";
   }
 
   return <main className="min-h-screen bg-[#EEF3F8] text-slate-950">
@@ -185,14 +231,15 @@ export function TaxCoordinatorDashboard() {
     <div className="min-h-screen lg:pl-72">
       <header className="sticky top-0 z-20 border-b border-[#D8E0EA] bg-[#EEF3F8]/90 px-4 py-3 backdrop-blur lg:hidden"><Button variant="outline" onClick={() => setDrawerOpen(true)}><Menu className="h-4 w-4" /> Menu</Button></header>
       <section className="space-y-6 p-4 sm:p-6 xl:p-8">
-        <div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1><p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p></div>
-        <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: options("tahun"), masaPajak: options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES, sourceSheet: options("sourceSheet") }} onUpload={() => inputRef.current?.click()} />
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1><p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p></div>{isManualPage(page) && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
+        <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: options("tahun"), masaPajak: options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES, sourceSheet: options("sourceSheet") }} onUpload={() => inputRef.current?.click()} onExport={exportCsv} onManual={() => openManual()} />
         <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
         <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{message}{!records.length && " KPI akan menampilkan 0 sampai data tersedia."}</div>
         {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
-        {page === "documents" ? <Documents rows={filtered} /> : <><KpiGrid items={buildKpis(page, filtered)} /><TransactionTable rows={filtered} title={page === "dashboard" ? "Resume Pembayaran Pajak" : `Tabel detail ${meta.title}`} /></>}
+        {page === "documents" ? <Documents rows={filtered} /> : <><KpiGrid items={buildKpis(page, filtered)} /><DataQuality rows={filtered} /><TransactionTable rows={filtered} title={page === "dashboard" ? "Resume Pembayaran Pajak" : `Tabel detail ${meta.title}`} onEdit={openManual} onDelete={deleteManual} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} /></>}
       </section>
     </div>
+    {modalOpen && <ManualModal page={page} form={form} setForm={setForm} errors={formErrors} onClose={() => setModalOpen(false)} onSave={saveManual} />}
   </main>;
 }
 
@@ -202,18 +249,29 @@ function Sidebar({ page, setPage, open, setOpen }: { page: Page; setPage: (page:
     <nav className="space-y-2">{navItems.map(([id, Icon, label]) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition", page === id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white")}><Icon className="h-5 w-5" />{label}</button>)}</nav>
   </aside>;
 }
-function FilterBar({ filters, updateFilter, options, onUpload }: { filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; options: { tahun: string[]; masaPajak: string[]; perusahaan: string[]; jenisPajak: readonly string[]; status: readonly string[]; sourceSheet: string[] }; onUpload: () => void }) {
+function FilterBar({ filters, updateFilter, options, onUpload, onExport, onManual }: { filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; options: { tahun: string[]; masaPajak: string[]; perusahaan: string[]; jenisPajak: readonly string[]; status: readonly string[]; sourceSheet: string[] }; onUpload: () => void; onExport: () => void; onManual: () => void }) {
   const selects: [keyof Filters, string, readonly string[]][] = [["tahun", "Semua Tahun", options.tahun], ["masaPajak", "Semua Masa Pajak", options.masaPajak], ["perusahaan", "Semua Perusahaan", options.perusahaan], ["jenisPajak", "Semua Jenis Pajak", options.jenisPajak], ["status", "Semua Status", options.status], ["sourceSheet", "Semua Source", options.sourceSheet]];
-  return <Card className="rounded-3xl border-[#D8E0EA] shadow-sm"><CardContent className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-8">{selects.map(([key, placeholder, values]) => <Select key={key} value={filters[key]} onChange={(e) => updateFilter(key, e.target.value)} className="h-11 rounded-2xl bg-white"><option value={ALL}>{placeholder}</option>{values.map((v) => <option key={v} value={v}>{v}</option>)}</Select>)}<div className="relative xl:col-span-1"><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" /><Input value={filters.search} onChange={(e) => updateFilter("search", e.target.value)} placeholder="Cari perusahaan, NTPN, jenis pajak..." className="h-11 rounded-2xl bg-white pl-9" /></div><Button onClick={onUpload} className="h-11 rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Upload className="h-4 w-4" /> Upload Excel</Button></CardContent></Card>;
+  return <Card className="rounded-3xl border-[#D8E0EA] shadow-sm"><CardContent className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-10">{selects.map(([key, placeholder, values]) => <Select key={key} value={filters[key]} onChange={(e) => updateFilter(key, e.target.value)} className="h-11 rounded-2xl bg-white"><option value={ALL}>{placeholder}</option>{values.map((v) => <option key={v} value={v}>{v}</option>)}</Select>)}<div className="relative xl:col-span-1"><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" /><Input value={filters.search} onChange={(e) => updateFilter("search", e.target.value)} placeholder="Cari perusahaan, NTPN, jenis pajak..." className="h-11 rounded-2xl bg-white pl-9" /></div><Button onClick={onUpload} className="h-11 rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Upload className="h-4 w-4" /> Upload Excel</Button><Button onClick={onManual} variant="outline" className="h-11 rounded-2xl font-bold"><Plus className="h-4 w-4" /> Manual</Button><Button onClick={onExport} variant="outline" className="h-11 rounded-2xl font-bold"><Download className="h-4 w-4" /> Export CSV</Button></CardContent></Card>;
 }
 function buildKpis(page: Page, rows: TaxTransaction[]): KpiItem[] {
-  if (page === "ppn") return [{ label: "Total PPN Keluaran", value: sum(rows, "PPN Keluaran"), money: true }, { label: "Total PPN Masukan", value: sum(rows, "PPN Masukan"), money: true }, { label: "PM Tidak Dikreditkan", value: sum(rows, "PM Tidak Dikreditkan"), money: true }, { label: "Kurang Bayar/Lebih Bayar", value: sum(rows, "Pembayaran PPN"), money: true }, { label: "Total Pembayaran PPN", value: sum(rows, "Pembayaran PPN"), money: true }];
+  if (page === "ppn") return [{ label: "Total PPN Keluaran", value: sum(rows, "PPN Keluaran"), money: true }, { label: "Total PPN Masukan", value: sum(rows, "PPN Masukan"), money: true }, { label: "PM Tidak Dikreditkan", value: sum(rows, "PM Tidak Dikreditkan"), money: true }, { label: "Kurang Bayar/Lebih Bayar", value: sum(rows, "Pembayaran PPN") + sum(rows, "PPN"), money: true }, { label: "Total Pembayaran PPN", value: sum(rows, "Pembayaran PPN") + sum(rows, "PPN"), money: true }];
   if (page === "pph21") return [{ label: "Total DPP PPh 21", value: dpp(rows), money: true }, { label: "Total PPh 21", value: sum(rows), money: true }, { label: "Jumlah transaksi", value: rows.length }, { label: "NTPN terisi", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "NTPN kosong", value: rows.filter((r) => !r.ntpnNtpd).length }];
   if (page === "unifikasi") return [{ label: "Total PPh 23", value: sum(rows, "PPh Pasal 23"), money: true }, { label: "Total PPh Final 4(2)", value: sum(rows, "PPh Final 4(2)"), money: true }, { label: "Total DPP", value: dpp(rows), money: true }, { label: "Total pembayaran", value: sum(rows), money: true }, { label: "NTPN terisi", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "NTPN kosong", value: rows.filter((r) => !r.ntpnNtpd).length }];
   if (page === "pb1") return [{ label: "Total DPP PB1", value: dpp(rows), money: true }, { label: "Total PB1", value: sum(rows), money: true }, { label: "Jumlah NTPD", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "NTPD kosong", value: rows.filter((r) => !r.ntpnNtpd).length }];
   if (page === "umkm") return [{ label: "Total DPP UMKM", value: dpp(rows), money: true }, { label: "Total PPh UMKM", value: sum(rows), money: true }, { label: "Jumlah transaksi", value: rows.length }, { label: "NTPN terisi", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "NTPN kosong", value: rows.filter((r) => !r.ntpnNtpd).length }];
-  return [{ label: "Total PPN Keluaran", value: sum(rows, "PPN Keluaran"), money: true }, { label: "Total PPN Masukan", value: sum(rows, "PPN Masukan"), money: true }, { label: "Total PM Tidak Dikreditkan", value: sum(rows, "PM Tidak Dikreditkan"), money: true }, { label: "Total Pembayaran PPN", value: sum(rows, "Pembayaran PPN"), money: true }, { label: "Total PPh Pasal 21", value: sum(rows, "PPh Pasal 21"), money: true }, { label: "Total PPh Pasal 23", value: sum(rows, "PPh Pasal 23"), money: true }, { label: "Total PPh Final 4(2)", value: sum(rows, "PPh Final 4(2)"), money: true }, { label: "Total PB1", value: sum(rows, "PB1"), money: true }, { label: "Total PPh UMKM", value: sum(rows, "PPh UMKM"), money: true }, { label: "Total seluruh pembayaran pajak", value: sum(rows), money: true }, { label: "Jumlah perusahaan", value: new Set(rows.map((r) => r.perusahaan)).size }, { label: "Jumlah masa pajak", value: new Set(rows.map((r) => r.masaPajak)).size }, { label: "Jumlah NTPN/NTPD terisi", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "Belum memiliki NTPN/NTPD", value: rows.filter((r) => !r.ntpnNtpd).length }];
+  return [{ label: "Total PPN Keluaran", value: sum(rows, "PPN Keluaran"), money: true }, { label: "Total PPN Masukan", value: sum(rows, "PPN Masukan"), money: true }, { label: "Total PM Tidak Dikreditkan", value: sum(rows, "PM Tidak Dikreditkan"), money: true }, { label: "Total Pembayaran PPN", value: sum(rows, "Pembayaran PPN") + sum(rows, "PPN"), money: true }, { label: "Total PPh Pasal 21", value: sum(rows, "PPh Pasal 21"), money: true }, { label: "Total PPh Pasal 23", value: sum(rows, "PPh Pasal 23"), money: true }, { label: "Total PPh Final 4(2)", value: sum(rows, "PPh Final 4(2)"), money: true }, { label: "Total PB1", value: sum(rows, "PB1"), money: true }, { label: "Total PPh UMKM", value: sum(rows, "PPh UMKM"), money: true }, { label: "Total seluruh pembayaran pajak", value: sum(rows), money: true }, { label: "Jumlah perusahaan", value: new Set(rows.map((r) => r.perusahaan)).size }, { label: "Jumlah masa pajak", value: new Set(rows.map((r) => r.masaPajak)).size }, { label: "Jumlah NTPN/NTPD terisi", value: rows.filter((r) => r.ntpnNtpd).length }, { label: "Belum memiliki NTPN/NTPD", value: rows.filter((r) => !r.ntpnNtpd).length }];
 }
 function KpiGrid({ items }: { items: KpiItem[] }) { return <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{items.map((item) => <Card key={item.label} className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardContent className="p-5"><p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">{item.label}</p><p className="mt-3 text-2xl font-black text-slate-950">{item.money ? rupiah(item.value) : plainNumber(item.value)}</p></CardContent></Card>)}</section>; }
-function TransactionTable({ title, rows }: { title: string; rows: TaxTransaction[] }) { return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{rows.length} baris data.</CardDescription></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Perusahaan", "Masa Pajak", "Jenis Pajak", "DPP", "Pajak Terhutang", "NTPN/NTPD", "Status", "Keterangan"].map((h) => <TableHead key={h} className="text-xs uppercase text-slate-500">{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.length ? rows.map((r) => <TableRow key={r.id} className="hover:bg-slate-50"><TableCell className="min-w-56 font-semibold">{r.perusahaan}</TableCell><TableCell>{r.masaPajak}</TableCell><TableCell>{r.jenisPajak}</TableCell><TableCell>{rupiah(r.dpp)}</TableCell><TableCell className={r.pajakTerhutang < 0 ? "font-bold text-red-600" : ""}>{rupiah(r.pajakTerhutang)}</TableCell><TableCell>{r.ntpnNtpd || "-"}</TableCell><TableCell><Badge variant={statusTone(r.status)}>{r.status === "Terverifikasi" && <CheckCircle2 className="mr-1 h-3 w-3" />}{r.status}</Badge></TableCell><TableCell className="min-w-72">{r.keterangan || `${r.sourceSheet} baris ${r.sourceRow}`}</TableCell></TableRow>) : <TableRow><TableCell colSpan={8} className="h-28 text-center text-sm font-semibold text-slate-500">Belum ada data. Silakan upload Excel.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>; }
+function DataQuality({ rows }: { rows: TaxTransaction[] }) {
+  const issues = rows.filter((r) => !r.ntpnNtpd || r.pajakTerhutang === 0 || r.pajakTerhutang < 0 || /lebih bayar|kompensasi/i.test(`${r.statusAuto} ${r.keterangan}`) || !r.dpp || !r.masaPajak || !r.perusahaan);
+  return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Data Quality</CardTitle><CardDescription>{issues.length} data perlu review: NTPN/NTPD kosong, pajak 0/negatif, lebih bayar, kompensasi, DPP/masa/perusahaan kosong, atau data belum lengkap.</CardDescription></CardHeader></Card>;
+}
+function TransactionTable({ title, rows, onEdit, onDelete, onUpload, onManual }: { title: string; rows: TaxTransaction[]; onEdit: (row: TaxTransaction) => void; onDelete: (id: string) => void; onUpload: () => void; onManual: () => void }) { return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{rows.length} baris data.</CardDescription></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Perusahaan", "Masa Pajak", "Jenis Pajak", "DPP", "Pajak Terhutang", "NTPN/NTPD", "Status", "Source", "Keterangan", "Aksi"].map((h) => <TableHead key={h} className="text-xs uppercase text-slate-500">{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.length ? rows.map((r) => <TableRow key={r.id} className="hover:bg-slate-50"><TableCell className="min-w-56 font-semibold">{r.perusahaan}</TableCell><TableCell>{r.masaPajak}</TableCell><TableCell>{r.jenisPajak}</TableCell><TableCell>{rupiah(r.dpp)}</TableCell><TableCell className={r.pajakTerhutang < 0 ? "font-bold text-red-600" : ""}>{rupiah(r.pajakTerhutang)}</TableCell><TableCell>{r.ntpnNtpd || "-"}</TableCell><TableCell><Badge variant={statusTone(r.status)}>{r.status === "Terverifikasi" && <CheckCircle2 className="mr-1 h-3 w-3" />}{r.status}</Badge><div className="mt-1 text-[11px] font-semibold text-slate-400">{r.statusAuto}</div></TableCell><TableCell><Badge variant={r.sourceData === "Manual Input" ? "success" : "secondary"}>{r.sourceData || "Excel Import"}</Badge></TableCell><TableCell className="min-w-72">{r.keterangan || `${r.sourceSheet} baris ${r.sourceRow}`}</TableCell><TableCell>{r.sourceData === "Manual Input" ? <div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => onEdit(r)}><Edit3 className="h-3 w-3" /> Edit</Button><Button size="sm" variant="outline" onClick={() => onDelete(r.id)}><Trash2 className="h-3 w-3" /> Hapus</Button></div> : <Badge variant="secondary">Excel Import</Badge>}</TableCell></TableRow>) : <TableRow><TableCell colSpan={10} className="h-36 text-center text-sm font-semibold text-slate-500"><div className="space-y-4"><p>Belum ada data. Upload Excel atau tambahkan data manual.</p><div className="flex justify-center gap-3"><Button onClick={onUpload} className="rounded-2xl bg-blue-600"><Upload className="h-4 w-4" /> Upload Excel</Button><Button onClick={onManual} variant="outline" className="rounded-2xl"><Plus className="h-4 w-4" /> Tambah Data Manual</Button></div></div></TableCell></TableRow>}</TableBody></Table></CardContent></Card>; }
+function ManualModal({ page, form, setForm, errors, onClose, onSave }: { page: Page; form: ManualForm; setForm: (form: ManualForm) => void; errors: Record<string, string>; onClose: () => void; onSave: () => void }) {
+  const set = (key: keyof ManualForm, value: string) => setForm({ ...form, [key]: value });
+  const ppnComputed = numberValue(form.ppnKeluaran) - numberValue(form.ppnMasukan) + numberValue(form.pmTidakDikreditkan);
+  const taxOptions = page === "ppn" ? ["PPN"] : page === "pb1" ? ["PB1"] : page === "dashboard" ? ["PPN", ...PPH_TYPES, "PB1"] : PPH_TYPES;
+  const field = (key: keyof ManualForm, label: string, type = "text") => <div><label className="text-xs font-extrabold uppercase text-slate-500">{label}</label><Input type={type} value={String(form[key] ?? "")} onChange={(e) => set(key, e.target.value)} className="mt-1 h-11 rounded-2xl" />{errors[key] && <p className="mt-1 text-xs font-semibold text-red-600">{errors[key]}</p>}</div>;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4"><div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl"><div className="mb-5 flex items-center justify-between"><div><h2 className="text-2xl font-black">{form.id ? "Edit Data Pajak Manual" : manualButtonLabel(page)}</h2><p className="text-sm font-medium text-slate-500">Source Data dan Source Sheet otomatis disimpan sebagai Manual Input.</p></div><Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div><div className="grid gap-4 md:grid-cols-2">{field("perusahaan", "Perusahaan")}{field("tahun", "Tahun")}{field("masaPajak", "Masa Pajak")}<div><label className="text-xs font-extrabold uppercase text-slate-500">Jenis Pajak</label><Select value={form.jenisPajak} onChange={(e) => set("jenisPajak", e.target.value)} className="mt-1 h-11 rounded-2xl">{taxOptions.map((t) => <option key={t} value={t}>{t}</option>)}</Select>{errors.jenisPajak && <p className="mt-1 text-xs font-semibold text-red-600">{errors.jenisPajak}</p>}</div>{form.jenisPajak === "PPN" ? <>{field("ppnKeluaran", "PPN Keluaran")}{field("ppnMasukan", "PPN Masukan")}{field("pmTidakDikreditkan", "PM Tidak Dikreditkan")}<div><label className="text-xs font-extrabold uppercase text-slate-500">Kurang Bayar / Lebih Bayar</label><Input value={rupiah(ppnComputed)} readOnly className="mt-1 h-11 rounded-2xl bg-slate-50" /></div>{field("totalPembayaranPpn", "Total Pembayaran PPN")}</> : <>{field("dpp", form.jenisPajak === "PB1" ? "DPP PB 1" : "DPP")}{field("pajak", form.jenisPajak === "PB1" ? "Nilai PB 1" : "Nilai Pajak / Pajak Terutang")}</>}{field("ntpnNtpd", form.jenisPajak === "PB1" ? "NTPD" : "NTPN/NTPD")}{field("tanggalBayar", "Tanggal Bayar", "date")}<div><label className="text-xs font-extrabold uppercase text-slate-500">Status Manual (opsional)</label><Select value={form.status} onChange={(e) => set("status", e.target.value)} className="mt-1 h-11 rounded-2xl"><option value="">Gunakan status otomatis</option>{STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</Select></div><div className="md:col-span-2">{field("keterangan", "Keterangan")}</div></div><div className="mt-6 flex justify-end gap-3"><Button variant="outline" className="rounded-2xl" onClick={onClose}>Batal</Button><Button className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700" onClick={onSave}>{form.id ? "Simpan Perubahan" : "Simpan"}</Button></div></div></div>;
+}
 function Documents({ rows }: { rows: TaxTransaction[] }) { const docs = rows.filter((r) => r.ntpnNtpd || /pdf|bukti|file|dokumen|lampiran/i.test(r.keterangan)); return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Dokumen Pajak</CardTitle><CardDescription>{docs.length} dokumen/rujukan bukti bayar terdeteksi dari data terfilter.</CardDescription></CardHeader><CardContent className="space-y-3">{docs.length ? docs.map((r) => <div key={r.id} className="flex flex-col gap-2 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"><div><p className="font-bold text-slate-950">{r.perusahaan} — {r.jenisPajak}</p><p className="text-sm text-slate-500">{r.masaPajak} • {r.sourceSheet} baris {r.sourceRow} • {r.keterangan || "Bukti bayar / NTPN-NTPD"}</p></div><Badge variant={r.ntpnNtpd ? "success" : "secondary"}>{r.ntpnNtpd || "Dokumen pendukung"}</Badge></div>) : <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center font-semibold text-slate-500">Belum ada dokumen pajak. Upload Excel dengan NTPN/NTPD, bukti bayar, PDF, atau file pendukung.</div>}</CardContent></Card>; }
