@@ -35,7 +35,7 @@ create index if not exists tax_entries_created_at_idx on tax_entries (created_at
 create index if not exists tax_entries_upload_batch_id_idx on tax_entries (upload_batch_id);
 create index if not exists upload_batches_uploaded_at_idx on upload_batches (uploaded_at desc);
 
--- Supabase RLS for testing/public dashboard. Tighten these policies with auth/company ownership before production.
+-- Legacy SQL schema retained for reference only; the dashboard now runs in static-file mode.
 alter table upload_batches enable row level security;
 alter table tax_entries enable row level security;
 
