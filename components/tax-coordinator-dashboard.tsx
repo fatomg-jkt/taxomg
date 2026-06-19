@@ -20,6 +20,8 @@ const COLORS = ["#1d4ed8", "#0f766e", "#7c3aed", "#0891b2", "#f97316", "#0f172a"
 type TaxType = (typeof TAX_TYPES)[number];
 type Status = "Sudah ada NTPN/NTPD" | "Belum ada NTPN/NTPD" | "Kompensasi lebih bayar" | "Data kosong" | "Nilai pajak 0";
 type Page = "summary" | "pph" | "ppn" | "pb1" | "quality";
+type ParseResult = { records: TaxTransaction[]; errors: string[]; sheetsRead: string[] };
+
 type TaxTransaction = {
   id: string;
   company: string;
@@ -45,10 +47,19 @@ function clean(value: unknown) {
 
 function numberValue(value: unknown) {
   if (typeof value === "number") return value;
-  const text = clean(value).replace(/\((.*)\)/, "-$1").replace(/,/g, ".").replace(/[^\d.-]/g, "");
-  const parts = text.split(".");
-  const normalized = parts.length > 2 ? `${parts.slice(0, -1).join("")}.${parts.at(-1)}` : text;
-  return Number(normalized) || 0;
+  const raw = clean(value);
+  if (!raw || raw === "-") return 0;
+  const text = raw.replace(/\((.*)\)/, "-$1").replace(/[^\d,.-]/g, "");
+  const comma = text.lastIndexOf(",");
+  const dot = text.lastIndexOf(".");
+  const decimalPos = comma > dot ? comma : dot;
+  const fraction = decimalPos >= 0 ? text.slice(decimalPos + 1) : "";
+  const hasDecimal = fraction.length > 0 && fraction.length <= 2;
+  const normalized = hasDecimal
+    ? `${text.slice(0, decimalPos).replace(/[.,]/g, "")}.${fraction.replace(/[.,]/g, "")}`
+    : text.replace(/[.,]/g, "");
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function monthIndex(name: string) {
@@ -97,9 +108,9 @@ function taxTypeFromText(value: unknown, sheet = ""): TaxType | undefined {
 
 function paymentStatus(taxAmount: number, dpp: number, ntpnNtpd: string, note: string): Status {
   const text = `${ntpnNtpd} ${note}`.toLowerCase();
+  if (!dpp && !taxAmount) return "Data kosong";
   if (/kompensasi|lebih bayar|\blb\b/.test(text) || taxAmount < 0) return "Kompensasi lebih bayar";
-  if (!taxAmount) return "Nilai pajak 0";
-  if (!dpp && !ntpnNtpd && !note) return "Data kosong";
+  if (taxAmount === 0) return "Nilai pajak 0";
   return ntpnNtpd && ntpnNtpd !== "-" ? "Sudah ada NTPN/NTPD" : "Belum ada NTPN/NTPD";
 }
 
@@ -155,17 +166,27 @@ function rowToRecords(row: unknown[], sheet: string, idx: number, headers?: stri
   ].filter((r) => r.dpp || r.taxAmount || r.ntpnNtpd || r.note);
 }
 
-function parseWorkbook(wb: XLSX.WorkBook) {
-  return wb.SheetNames.flatMap((sheet) => {
+function parseWorkbook(wb: XLSX.WorkBook): ParseResult {
+  const errors: string[] = [];
+  const sheetsRead: string[] = [];
+  const records = wb.SheetNames.flatMap((sheet) => {
     const aoa = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheet], { header: 1, blankrows: false });
     const headerRow = aoa.findIndex((row) => row.some((cell) => /perusahaan|company|masa|jenis pajak|dpp|ntpn|ntpd/i.test(clean(cell))));
     const headers = headerRow >= 0 ? aoa[headerRow].map(clean) : undefined;
-    return aoa.slice(headerRow >= 0 ? headerRow + 1 : 1).filter(hasSignal).flatMap((row, i) => rowToRecords(row, sheet, i + (headerRow >= 0 ? headerRow + 1 : 1), headers));
+    const dataRows = aoa.slice(headerRow >= 0 ? headerRow + 1 : 1).filter(hasSignal);
+    const parsed = dataRows.flatMap((row, i) => rowToRecords(row, sheet, i + (headerRow >= 0 ? headerRow + 1 : 1), headers));
+    if (parsed.length) sheetsRead.push(sheet);
+    else errors.push(`Sheet "${sheet}" tidak menghasilkan transaksi. Pastikan ada kolom Perusahaan, Masa Pajak, Jenis Pajak, DPP, Nilai Pajak, dan NTPN/NTPD.`);
+    if (headers && !headers.some((h) => /nilai pajak|pajak terhutang|jumlah pajak|amount|ppn|pembayaran/i.test(h))) errors.push(`Sheet "${sheet}" tidak memiliki kolom nilai pajak yang dikenali.`);
+    return parsed;
   });
+  if (!records.length) errors.push("Tidak ada data pajak yang berhasil dinormalisasi dari workbook.");
+  return { records, errors, sheetsRead };
 }
 
-function rupiah(value: number) {
-  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value || 0);
+function rupiah(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value);
 }
 function shortRp(value: number) {
   return new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(value || 0);
@@ -219,9 +240,12 @@ export function TaxCoordinatorDashboard() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const imported = parseWorkbook(XLSX.read(reader.result, { type: "array", cellDates: false }));
-      setRecords(imported);
-      setMessage(`Berhasil normalisasi ${imported.length} transaksi pajak dari ${file.name}. Struktur dashboard dibuat dari sheet Excel yang diupload.`);
+      const result = parseWorkbook(XLSX.read(reader.result, { type: "array", cellDates: false }));
+      setRecords(result.records);
+      const totalTax = result.records.reduce((sum, row) => sum + row.taxAmount, 0);
+      const readableSheets = result.sheetsRead.length ? result.sheetsRead.join(", ") : "tidak ada";
+      const warning = result.records.length && totalTax === 0 ? ` Peringatan: KPI masih 0 karena semua nilai pajak terbaca 0; cek mapping kolom/sheet. ${result.errors.join(" ")}` : result.errors.length ? ` Catatan: ${result.errors.join(" ")}` : "";
+      setMessage(`Berhasil normalisasi ${result.records.length} transaksi pajak dari ${file.name}. Sheet terbaca: ${readableSheets}.${warning}`);
     };
     reader.readAsArrayBuffer(file);
     event.target.value = "";
@@ -243,7 +267,7 @@ export function TaxCoordinatorDashboard() {
           <div><p className="mb-2 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.2em]"><Database className="h-4 w-4" /> Summary All Tax Payment</p><h1 className="text-4xl font-black">Dashboard Monitoring Pembayaran Pajak</h1><p className="mt-2 text-blue-100">Ringkasan Pembayaran Pajak Seluruh Perusahaan • Periode data: {periodText}</p></div>
           <div className="flex flex-wrap gap-2"><Button onClick={() => inputRef.current?.click()}><Upload className="h-4 w-4" /> Upload Excel</Button><Button variant="outline" className="bg-white text-slate-950 hover:bg-slate-100" onClick={exportCsv}><Download className="h-4 w-4" /> Export CSV</Button><Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" /></div>
         </div>
-        <div className="grid gap-3 rounded-2xl bg-white/10 p-4 backdrop-blur md:grid-cols-5"><Filter className="hidden h-5 w-5 self-center text-blue-100 md:block" />{[["year", years], ["period", periods], ["company", companies], ["taxType", TAX_TYPES], ["status", ["Sudah ada NTPN/NTPD", "Belum ada NTPN/NTPD", "Kompensasi lebih bayar", "Data kosong", "Nilai pajak 0"]]].map(([key, values]) => <Select key={key as string} value={filters[key as keyof Filters]} onChange={(e) => updateFilter(key as keyof Filters, e.target.value)}><option>{ALL}</option>{(values as readonly string[]).map((v) => <option key={v}>{v}</option>)}</Select>)}</div>
+        <div className="grid gap-3 rounded-2xl bg-white/10 p-4 backdrop-blur md:grid-cols-5"><Filter className="hidden h-5 w-5 self-center text-blue-100 md:block" />{[["year", "Tahun", years], ["period", "Masa Pajak", periods], ["company", "Perusahaan", companies], ["taxType", "Jenis Pajak", TAX_TYPES], ["status", "Status NTPN/NTPD", ["Sudah ada NTPN/NTPD", "Belum ada NTPN/NTPD", "Kompensasi lebih bayar", "Data kosong", "Nilai pajak 0"]]].map(([key, label, values]) => <label key={key as string} className="space-y-1 text-xs font-bold uppercase tracking-wide text-blue-100"><span>{label as string}</span><Select value={filters[key as keyof Filters]} onChange={(e) => updateFilter(key as keyof Filters, e.target.value)}><option>{ALL}</option>{(values as readonly string[]).map((v) => <option key={v}>{v}</option>)}</Select></label>)}</div>
       </div>
     </section>
     <section className="mx-auto max-w-7xl space-y-6 p-6">
@@ -261,11 +285,11 @@ export function TaxCoordinatorDashboard() {
 function Kpi({ label, value }: { label: string; value: string | number }) { return <Card><CardContent className="p-5"><p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 text-2xl font-black text-slate-950">{typeof value === "number" ? rupiah(value) : value}</p></CardContent></Card>; }
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) { return <Card><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="h-80">{children}</CardContent></Card>; }
 function Summary({ totals, filtered, taxByType, trend, byCompany, statusData, alerts }: { totals: { dpp: number; tax: number; pph: number; ppn: number; pb1: number }; filtered: TaxTransaction[]; taxByType: { name: string; value: number }[]; trend: Record<string, string | number>[]; byCompany: { name: string; value: number }[]; statusData: { name: string; value: number }[]; alerts: string[] }) {
-  return <><section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"><Kpi label="Total DPP seluruh pajak" value={totals.dpp} /><Kpi label="Total nilai pajak" value={totals.tax} /><Kpi label="Total PPh" value={totals.pph} /><Kpi label="Total PPN" value={totals.ppn} /><Kpi label="Total PB 1" value={totals.pb1} /><Kpi label="Jumlah perusahaan" value={new Set(filtered.map((r) => r.company)).size.toLocaleString("id-ID")} /><Kpi label="Jumlah transaksi pajak" value={filtered.length.toLocaleString("id-ID")} /><Kpi label="Sudah ada NTPN/NTPD" value={filtered.filter((r) => r.status === "Sudah ada NTPN/NTPD").length.toLocaleString("id-ID")} /><Kpi label="Belum ada NTPN/NTPD" value={filtered.filter((r) => r.status === "Belum ada NTPN/NTPD").length.toLocaleString("id-ID")} /><Kpi label="Kompensasi lebih bayar" value={filtered.filter((r) => r.status === "Kompensasi lebih bayar").length.toLocaleString("id-ID")} /></section>
+  return <><section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5"><Kpi label="Total DPP seluruh pajak" value={totals.dpp} /><Kpi label="Total nilai pajak" value={totals.tax} /><Kpi label="Total PPh" value={totals.pph} /><Kpi label="Total PPN" value={totals.ppn} /><Kpi label="Total PB 1" value={totals.pb1} /><Kpi label="Jumlah perusahaan" value={new Set(filtered.map((r) => r.company)).size.toLocaleString("id-ID")} /><Kpi label="Jumlah transaksi pajak" value={filtered.length.toLocaleString("id-ID")} /><Kpi label="Jumlah NTPN/NTPD tersedia" value={filtered.filter((r) => r.status === "Sudah ada NTPN/NTPD").length.toLocaleString("id-ID")} /><Kpi label="Jumlah NTPN/NTPD kosong" value={filtered.filter((r) => r.status === "Belum ada NTPN/NTPD").length.toLocaleString("id-ID")} /><Kpi label="Kompensasi lebih bayar" value={filtered.filter((r) => r.status === "Kompensasi lebih bayar").length.toLocaleString("id-ID")} /></section>
   <section className="grid gap-6 xl:grid-cols-2"><ChartCard title="Ringkasan Nilai Pajak per Jenis Pajak"><ResponsiveContainer><BarChart data={taxByType}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" interval={0} angle={-18} textAnchor="end" height={80} /><YAxis tickFormatter={(v) => shortRp(Number(v))} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Bar dataKey="value" name="Nilai Pajak" fill="#1d4ed8" /></BarChart></ResponsiveContainer></ChartCard><ChartCard title="Komposisi Pembayaran Pajak"><ResponsiveContainer><PieChart><Pie data={taxByType} dataKey="value" nameKey="name" outerRadius={110} label>{taxByType.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip formatter={(v) => rupiah(Number(v))} /><Legend /></PieChart></ResponsiveContainer></ChartCard></section>
   <ChartCard title="Tren Pembayaran Pajak Bulanan"><ResponsiveContainer><LineChart data={trend}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="period" /><YAxis tickFormatter={(v) => shortRp(Number(v))} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Legend />{TAX_TYPES.map((type, i) => <Line key={type} type="monotone" dataKey={type} stroke={COLORS[i]} strokeWidth={2} />)}</LineChart></ResponsiveContainer></ChartCard>
   <section className="grid gap-6 xl:grid-cols-3"><ChartCard title="Ranking Perusahaan"><ResponsiveContainer><BarChart data={byCompany} layout="vertical"><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" tickFormatter={(v) => shortRp(Number(v))} /><YAxis type="category" dataKey="name" width={170} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Bar dataKey="value" fill="#0f766e" /></BarChart></ResponsiveContainer></ChartCard><ChartCard title="Status NTPN / NTPD"><ResponsiveContainer><PieChart><Pie data={statusData} dataKey="value" nameKey="name" outerRadius={105} label>{statusData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer></ChartCard><Card><CardHeader><CardTitle>Alert / Highlight</CardTitle></CardHeader><CardContent className="space-y-3">{alerts.map((a) => <div key={a} className="rounded-xl border border-orange-200 bg-orange-50 p-3 text-sm font-semibold text-orange-800"><AlertTriangle className="mr-2 inline h-4 w-4" />{a}</div>)}</CardContent></Card></section><TransactionTable title="Tabel Detail Ringkas" rows={filtered.slice(0, 100)} /></>;
 }
 function Detail({ title, rows, chartTypes, ppn = false }: { title: string; rows: TaxTransaction[]; chartTypes: TaxType[]; ppn?: boolean }) { const trend = Array.from(new Set(rows.map((r) => r.period))).sort((a, b) => periodSort(a) - periodSort(b)).map((period) => ({ period, pajak: rows.filter((r) => r.period === period).reduce((a, r) => a + r.taxAmount, 0), keluaran: rows.filter((r) => r.period === period).reduce((a, r) => a + (r.outputVat ?? 0), 0), masukan: rows.filter((r) => r.period === period).reduce((a, r) => a + (r.inputVat ?? 0), 0) })); return <><section className="grid gap-4 md:grid-cols-4"><Kpi label="Total DPP" value={rows.reduce((a, r) => a + r.dpp, 0)} /><Kpi label={ppn ? "Kurang bayar / lebih bayar" : "Total Pajak"} value={rows.reduce((a, r) => a + r.taxAmount, 0)} /><Kpi label={ppn ? "Pajak keluaran" : "Jumlah NTPN/NTPD"} value={(ppn ? rows.reduce((a, r) => a + (r.outputVat ?? 0), 0) : rows.filter((r) => r.ntpnNtpd).length).toLocaleString("id-ID")} /><Kpi label={ppn ? "Pajak masukan" : "Transaksi"} value={(ppn ? rows.reduce((a, r) => a + (r.inputVat ?? 0), 0) : rows.length).toLocaleString("id-ID")} /></section><section className="grid gap-6 xl:grid-cols-2"><ChartCard title={`${title} — tren bulanan`}><ResponsiveContainer><LineChart data={trend}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="period" /><YAxis tickFormatter={(v) => shortRp(Number(v))} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Legend /><Line dataKey="pajak" stroke="#1d4ed8" />{ppn && <><Line dataKey="keluaran" stroke="#16a34a" /><Line dataKey="masukan" stroke="#f97316" /></>}</LineChart></ResponsiveContainer></ChartCard><ChartCard title={`${title} — perbandingan perusahaan`}><ResponsiveContainer><BarChart data={groupSum(rows, (r) => r.company).sort((a, b) => b.value - a.value)}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" hide /><YAxis tickFormatter={(v) => shortRp(Number(v))} /><Tooltip formatter={(v) => rupiah(Number(v))} /><Bar dataKey="value" fill="#0f766e" /></BarChart></ResponsiveContainer></ChartCard></section><ChartCard title={`${title} — status pembayaran`}><ResponsiveContainer><BarChart data={groupSum(rows, (r) => r.status)}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Tooltip /><Bar dataKey="value" fill="#1d4ed8" /></BarChart></ResponsiveContainer></ChartCard><TransactionTable title={`Tabel detail ${chartTypes.join(", ")}`} rows={rows} /></>; }
-function Quality({ rows, periods, companies }: { rows: TaxTransaction[]; periods: string[]; companies: string[] }) { const issues = rows.filter((r) => !r.ntpnNtpd || r.taxAmount <= 0 || r.status === "Kompensasi lebih bayar" || !r.dpp); const missing = companies.flatMap((company) => periods.filter((period) => !rows.some((r) => r.company === company && r.period === period)).map((period) => ({ company, period }))).slice(0, 40); return <><section className="grid gap-4 md:grid-cols-4"><Kpi label="NTPN/NTPD kosong" value={rows.filter((r) => !r.ntpnNtpd).length.toLocaleString("id-ID")} /><Kpi label="Pajak 0" value={rows.filter((r) => r.taxAmount === 0).length.toLocaleString("id-ID")} /><Kpi label="Pajak negatif" value={rows.filter((r) => r.taxAmount < 0).length.toLocaleString("id-ID")} /><Kpi label="Kompensasi lebih bayar" value={rows.filter((r) => r.status === "Kompensasi lebih bayar").length.toLocaleString("id-ID")} /></section><TransactionTable title="Data yang perlu dicek ulang oleh accounting" rows={issues} /><Card><CardHeader><CardTitle>Masa pajak / perusahaan belum lengkap</CardTitle><CardDescription>Pasangan perusahaan dan masa pajak yang belum memiliki transaksi pada data terfilter.</CardDescription></CardHeader><CardContent className="grid gap-2 md:grid-cols-2">{missing.map((m) => <div key={`${m.company}-${m.period}`} className="rounded-lg bg-slate-50 p-3 text-sm font-semibold"><AlertTriangle className="mr-2 inline h-4 w-4 text-orange-500" />{m.company} — {m.period}</div>)}</CardContent></Card></>; }
+function Quality({ rows, periods, companies }: { rows: TaxTransaction[]; periods: string[]; companies: string[] }) { const issues = rows.filter((r) => !r.ntpnNtpd || r.taxAmount <= 0 || r.status === "Kompensasi lebih bayar" || !r.dpp || r.period === "-"); const missing = companies.flatMap((company) => periods.filter((period) => !rows.some((r) => r.company === company && r.period === period)).map((period) => ({ company, period }))).slice(0, 40); return <><section className="grid gap-4 md:grid-cols-3 xl:grid-cols-6"><Kpi label="NTPN/NTPD kosong" value={rows.filter((r) => !r.ntpnNtpd).length.toLocaleString("id-ID")} /><Kpi label="Pajak 0" value={rows.filter((r) => r.taxAmount === 0).length.toLocaleString("id-ID")} /><Kpi label="Pajak negatif / LB" value={rows.filter((r) => r.taxAmount < 0).length.toLocaleString("id-ID")} /><Kpi label="Kompensasi lebih bayar" value={rows.filter((r) => r.status === "Kompensasi lebih bayar").length.toLocaleString("id-ID")} /><Kpi label="DPP kosong" value={rows.filter((r) => !r.dpp).length.toLocaleString("id-ID")} /><Kpi label="Masa pajak kosong" value={rows.filter((r) => r.period === "-").length.toLocaleString("id-ID")} /></section><TransactionTable title="Data yang perlu dicek ulang oleh accounting" rows={issues} /><Card><CardHeader><CardTitle>Masa pajak / perusahaan belum lengkap</CardTitle><CardDescription>Pasangan perusahaan dan masa pajak yang belum memiliki transaksi pada data terfilter.</CardDescription></CardHeader><CardContent className="grid gap-2 md:grid-cols-2">{missing.map((m) => <div key={`${m.company}-${m.period}`} className="rounded-lg bg-slate-50 p-3 text-sm font-semibold"><AlertTriangle className="mr-2 inline h-4 w-4 text-orange-500" />{m.company} — {m.period}</div>)}</CardContent></Card></>; }
 function TransactionTable({ title, rows }: { title: string; rows: TaxTransaction[] }) { return <Card><CardHeader><CardTitle>{title}</CardTitle><CardDescription>{rows.length} transaksi pajak.</CardDescription></CardHeader><CardContent className="overflow-auto"><Table><TableHeader><TableRow>{["Perusahaan", "Masa pajak", "Jenis pajak", "DPP", "Pajak", "NTPN/NTPD", "Status", "Keterangan"].map((h) => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map((r) => <TableRow key={r.id}><TableCell className="min-w-56 font-semibold">{r.company}</TableCell><TableCell>{r.period}</TableCell><TableCell>{r.taxType}</TableCell><TableCell className={r.dpp < 0 ? "text-red-600" : ""}>{rupiah(r.dpp)}</TableCell><TableCell className={r.taxAmount < 0 ? "font-bold text-red-600" : ""}>{rupiah(r.taxAmount)}</TableCell><TableCell>{r.ntpnNtpd || "-"}</TableCell><TableCell><Badge variant={statusTone(r.status)}>{r.status === "Sudah ada NTPN/NTPD" && <CheckCircle2 className="mr-1 h-3 w-3" />}{r.status}</Badge></TableCell><TableCell className="min-w-72">{r.note || `${r.sourceSheet} baris ${r.sourceRow}`}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card>; }
