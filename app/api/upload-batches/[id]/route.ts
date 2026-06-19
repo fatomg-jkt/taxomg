@@ -6,5 +6,5 @@ export async function DELETE(_request: Request, context: { params: Promise<{ id:
     const { id } = await context.params;
     const deleted = await deleteUploadBatch(id);
     return deleted ? NextResponse.json({ ok: true }) : NextResponse.json({ error: "Batch upload tidak ditemukan." }, { status: 404 });
-  } catch { return NextResponse.json({ error: "Data upload gagal dihapus." }, { status: 500 }); }
+  } catch (error) { console.error("[api] Upload delete failed", error); return NextResponse.json({ error: error instanceof Error ? error.message : "Data upload gagal dihapus." }, { status: 500 }); }
 }
