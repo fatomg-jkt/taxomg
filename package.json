@@ -20,7 +20,8 @@
     "react-dom": "^19.0.0",
     "recharts": "^2.15.0",
     "tailwind-merge": "^2.5.5",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@vercel/blob": "^1.0.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
