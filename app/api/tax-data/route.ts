@@ -1,4 +1,4 @@
-import { list, put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
 const fileName = "tax-dashboard-data.json";
@@ -12,14 +12,10 @@ export async function GET() {
   if (!storeId) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
 
   try {
-    const blobs = await list({ prefix: fileName, storeId });
-    const blob = blobs.blobs.find((item: { pathname: string; url: string }) => item.pathname === fileName) ?? blobs.blobs[0];
-    if (!blob?.url) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
+    const result = await get(fileName, { access: "private", storeId });
+    if (result?.statusCode !== 200 || !result.stream) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
 
-    const response = await fetch(blob.url, { cache: "no-store" });
-    if (!response.ok) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
-
-    const text = await response.text();
+    const text = await new Response(result.stream).text();
     if (!text.trim()) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
 
     const payload = JSON.parse(text);
@@ -44,7 +40,7 @@ export async function POST(request: Request) {
   const updatedAt = new Date().toISOString();
   const body = JSON.stringify({ records: payload.records ?? [], summaryOverrides: payload.summaryOverrides ?? {}, updatedAt }, null, 2);
   const blob = await put(fileName, body, {
-    access: "public",
+    access: "private",
     contentType: "application/json",
     addRandomSuffix: false,
     allowOverwrite: true,
