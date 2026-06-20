@@ -245,7 +245,7 @@ export function TaxCoordinatorDashboard() {
     } finally { setLoading(false); }
   }
   async function verifyPassword() {
-    const password = window.prompt("Masukkan password edit");
+    const password = window.prompt("Masukkan password fatmanage");
     if (!password) return null;
     const response = await fetch("/api/verify-edit-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password }) });
     if (!response.ok) { setError("Password salah. Aksi dibatalkan."); return null; }
@@ -256,8 +256,8 @@ export function TaxCoordinatorDashboard() {
     setBusy(true); setError("");
     try {
       const response = await fetch("/api/tax-data", { method: "POST", headers: { "Content-Type": "application/json", "x-dashboard-password": password }, body: JSON.stringify({ records: records.map(toStaticEntry), summaryOverrides }) });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Save to Cloud gagal.");
+      const payload = await response.json().catch(() => ({ error: "Save to Cloud gagal." }));
+      if (!response.ok) throw new Error(typeof payload.error === "string" ? payload.error : "Save to Cloud gagal.");
       setLastSaved(payload.updatedAt); setMessage("Save to Cloud berhasil. Data sudah shared via Vercel Blob.");
     } catch (err) { setError(err instanceof Error ? err.message : "Save to Cloud gagal."); } finally { setBusy(false); }
   }
