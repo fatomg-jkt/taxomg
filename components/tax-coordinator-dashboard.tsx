@@ -12,6 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { cn } from "@/lib/utils";
 
 const FILTER_STORAGE_KEY = "tax-dashboard-filters-v1";
+const UPLOAD_STORAGE_KEY = "tax-dashboard-upload-records-v1";
+const UPLOAD_HISTORY_STORAGE_KEY = "tax-dashboard-upload-history-v1";
 const ALL = "__all__";
 const TAX_TYPES = ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN", "PPN", "PPh Pasal 21", "PPh Pasal 23", "PPh Final 4(2)", "PB1", "PPh UMKM"] as const;
 const STATUSES = ["Terverifikasi", "Belum Lengkap", "Nihil", "Lebih Bayar", "Kompensasi", "Sudah ada NTPN/NTPD", "Belum ada NTPN/NTPD", "Nilai pajak 0", "Data kosong"] as const;
@@ -21,7 +23,7 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "
 type TaxType = (typeof TAX_TYPES)[number];
 type Status = (typeof STATUSES)[number];
 type Page = "dashboard" | "ppn" | "pph21" | "unifikasi" | "pb1" | "umkm" | "documents";
-type ParseResult = { records: TaxTransaction[]; errors: string[]; sheetsRead: string[] };
+type ParseResult = { records: TaxTransaction[]; errors: string[]; warnings: string[]; sheetsRead: string[]; skipped: number };
 
 type TaxTransaction = {
   id: string;
@@ -46,6 +48,7 @@ type TaxTransaction = {
 
 type Filters = { tahun: string; masaPajak: string; perusahaan: string; jenisPajak: string; status: string; search: string };
 type UploadBatch = { id: string; file_name: string; uploaded_at: string; total_rows: number; uploaded_by: string; status: string; error_message: string };
+type UploadSummary = { filename: string; imported: number; skipped: number; warnings: string[]; errors: string[]; mode: "replace" | "append" } | null;
 type StaticTaxEntry = { id?: string; perusahaan?: string; tahun?: string; masaPajak?: string; masa_pajak?: string; jenisPajak?: TaxType; jenis_pajak?: TaxType; dpp?: number | string; pajak?: number | string; pajakTerhutang?: number | string; ntpnNtpd?: string; ntpn_ntpd?: string; tanggalBayar?: string | null; tanggal_bayar?: string | null; status?: string; statusAuto?: string; status_auto?: string; keterangan?: string; sourceData?: "Static File" | "Excel Import" | "Manual Input"; source_data?: "Static File" | "Excel Import" | "Manual Input"; sourceSheet?: string; source_sheet?: string; sourceRow?: number; source_row?: number; uploadBatchId?: string | null; upload_batch_id?: string | null; createdAt?: string; created_at?: string; updatedAt?: string; updated_at?: string };
 
 type KpiItem = { label: string; value: number; money?: boolean };
@@ -94,19 +97,6 @@ function normalizePeriod(value: unknown) {
 }
 function periodYear(period: string) { const match = period.match(/(\d{2,4})$/); return match ? (match[1].length === 2 ? `20${match[1]}` : match[1]) : String(new Date().getFullYear()); }
 function periodSort(period: string) { const [m] = period.split("-"); return Number(periodYear(period)) * 100 + Math.max(MONTHS.findIndex((month) => month === m), 0); }
-function taxTypeFromText(value: unknown, sheet = ""): TaxType | undefined {
-  const text = `${value ?? ""} ${sheet}`.toLowerCase();
-  if (/pm\s*tidak|tidak\s+dikredit/.test(text)) return "PM Tidak Dikreditkan";
-  if (/pembayaran\s*ppn|bayar\s*ppn|kurang\s*bayar|lebih\s*bayar|kb\/?lb/.test(text)) return "Pembayaran PPN";
-  if (/ppn.*masukan|masukan.*ppn|input\s*vat/.test(text)) return "PPN Masukan";
-  if (/ppn|vat|keluaran|output\s*vat/.test(text)) return "PPN Keluaran";
-  if (/pb\s*1|pb1|resto|restaurant|restoran/.test(text)) return "PB1";
-  if (/umkm/.test(text)) return "PPh UMKM";
-  if (/4\s*\(?2\)?|final/.test(text)) return "PPh Final 4(2)";
-  if (/23/.test(text)) return "PPh Pasal 23";
-  if (/21/.test(text)) return "PPh Pasal 21";
-  return undefined;
-}
 function automaticStatus(pajak: number, ntpnNtpd: string, keterangan: string, dppValue?: number): string {
   const text = `${keterangan} ${ntpnNtpd}`.toLowerCase();
   if ((dppValue === undefined || dppValue === 0) && pajak === 0 && !clean(ntpnNtpd) && !clean(keterangan)) return "Data kosong";
@@ -123,42 +113,95 @@ function displayStatus(auto: string): Status | string {
   if (auto === "Kompensasi lebih bayar") return "Kompensasi";
   return auto;
 }
-function hasSignal(row: unknown[]) { return row.some((cell) => clean(cell)) && (row.some((cell) => numberValue(cell) !== 0) || row.some((cell) => /ntpn|ntpd|kompensasi|lebih bayar|pph|ppn|pb\s*1/i.test(clean(cell)))); }
-function rowToRecords(row: unknown[], sheet: string, idx: number, headers?: string[]) {
-  const lower = (headers ?? []).map((h) => h.toLowerCase());
-  const at = (...keys: string[]) => lower.findIndex((h) => keys.some((k) => h.includes(k)));
-  const perusahaanIdx = at("perusahaan", "company", "nama perusahaan");
-  const masaIdx = at("masa", "periode", "bulan", "period");
-  const jenisIdx = at("jenis", "tax type", "kategori");
-  const dppIdx = at("dpp", "dasar");
-  const pajakIdx = at("pajak terhutang", "nilai pajak", "jumlah pajak", "amount", "pembayaran", "ppn");
-  const ntpnIdx = at("ntpn", "ntpd", "bukti");
-  const ketIdx = at("keterangan", "catatan", "note", "remark");
-  const perusahaan = clean(row[perusahaanIdx >= 0 ? perusahaanIdx : 0]) || "Perusahaan Belum Diisi";
-  const masaPajak = normalizePeriod(row[masaIdx >= 0 ? masaIdx : 1]);
-  const keterangan = clean(row[ketIdx >= 0 ? ketIdx : row.length - 1]);
-  const makeRecord = (jenisPajak: TaxType, dpp: unknown, pajak: unknown, ntpn: unknown) => {
-    const pajakTerhutang = numberValue(pajak);
-    const ntpnNtpd = clean(ntpn);
-    const dppNumber = numberValue(dpp); const statusAuto = automaticStatus(pajakTerhutang, ntpnNtpd, keterangan, dppNumber);
-    return { id: `${sheet}-${idx}-${jenisPajak}-${crypto.randomUUID()}`, perusahaan, masaPajak, tahun: periodYear(masaPajak), jenisPajak, dpp: dppNumber, pajakTerhutang, ntpnNtpd, status: displayStatus(statusAuto), statusAuto, keterangan, sourceData: "Excel Import", sourceSheet: sheet, sourceRow: idx + 1 } satisfies TaxTransaction;
-  };
-  if (headers && perusahaanIdx >= 0) return [makeRecord(taxTypeFromText(row[jenisIdx], sheet) ?? taxTypeFromText(row.join(" "), sheet) ?? "PPh Pasal 21", row[dppIdx], row[pajakIdx], row[ntpnIdx])];
-  return [makeRecord("PPh Pasal 21", row[2], row[3], row[4]), makeRecord("PPh Pasal 23", row[5], row[6], row[7]), makeRecord("PPh Final 4(2)", row[8], row[9], row[10]), makeRecord("PB1", row[11], row[12], row[13]), makeRecord("PPh UMKM", row[14], row[15], row[16])].filter((r) => r.dpp || r.pajakTerhutang || r.ntpnNtpd || r.keterangan);
+type TaxColumnMap = { type: TaxType; dpp: number; pajak: number; ntpn: number };
+function cell(row: unknown[], index: number) { return row[index]; }
+function makeExcelRecord(params: { sheet: string; rowIndex: number; company: string; masa: unknown; type: TaxType; dpp: unknown; pajak: unknown; ntpn: unknown; keterangan?: unknown }) {
+  const pajakTerhutang = numberValue(params.pajak);
+  const ntpnNtpd = clean(params.ntpn);
+  const dppNumber = numberValue(params.dpp);
+  const keterangan = clean(params.keterangan);
+  const masaPajak = normalizePeriod(params.masa);
+  const statusAuto = automaticStatus(pajakTerhutang, ntpnNtpd, keterangan, dppNumber);
+  return { id: `${params.sheet}-${params.rowIndex}-${params.type}-${crypto.randomUUID()}`, perusahaan: clean(params.company), masaPajak, tahun: periodYear(masaPajak), jenisPajak: params.type, dpp: dppNumber, pajakTerhutang, ntpnNtpd, status: displayStatus(statusAuto), statusAuto, keterangan, sourceData: "Excel Import", sourceSheet: params.sheet, sourceRow: params.rowIndex } satisfies TaxTransaction;
+}
+function validateImportedRecord(record: TaxTransaction) {
+  const warnings: string[] = [];
+  if (!clean(record.perusahaan)) warnings.push(`Baris ${record.sourceSheet}!${record.sourceRow}: company kosong.`);
+  if (!clean(record.masaPajak) || record.masaPajak === "-") warnings.push(`Baris ${record.sourceSheet}!${record.sourceRow}: masa kosong.`);
+  if (record.pajakTerhutang <= 0) warnings.push(`Baris ${record.sourceSheet}!${record.sourceRow}: pajak kosong/nol/negatif untuk ${record.jenisPajak}.`);
+  if (!clean(record.ntpnNtpd) || clean(record.ntpnNtpd) === "-") warnings.push(`Baris ${record.sourceSheet}!${record.sourceRow}: NTPN/NTPD kosong untuk ${record.jenisPajak}.`);
+  return warnings;
+}
+function hasTaxSignal(row: unknown[], map: TaxColumnMap) { return numberValue(cell(row, map.dpp)) !== 0 || numberValue(cell(row, map.pajak)) !== 0 || clean(cell(row, map.ntpn)); }
+function parsePphRows(aoa: unknown[][], sheet: string, startRow: number, companyCol: number, masaCol: number, maps: TaxColumnMap[]) {
+  const records: TaxTransaction[] = [];
+  let skipped = 0;
+  let lastCompany = "";
+  aoa.slice(startRow - 1).forEach((row, offset) => {
+    const sourceRow = startRow + offset;
+    const company = clean(cell(row, companyCol));
+    if (company) lastCompany = company;
+    const carriedCompany = company || lastCompany;
+    const masa = cell(row, masaCol);
+    const rowHasData = clean(carriedCompany) || clean(masa) || maps.some((map) => hasTaxSignal(row, map));
+    if (!rowHasData) return;
+    maps.forEach((map) => {
+      if (!hasTaxSignal(row, map)) { skipped += 1; return; }
+      records.push(makeExcelRecord({ sheet, rowIndex: sourceRow, company: carriedCompany, masa, type: map.type, dpp: cell(row, map.dpp), pajak: cell(row, map.pajak), ntpn: cell(row, map.ntpn) }));
+    });
+  });
+  return { records, skipped };
+}
+function parsePpn1001(aoa: unknown[][], sheet: string) {
+  const records: TaxTransaction[] = [];
+  let skipped = 0;
+  const company = clean(cell(aoa[2] ?? [], 1));
+  aoa.slice(6, 18).forEach((row, offset) => {
+    const sourceRow = 7 + offset;
+    const masa = cell(row, 1);
+    const maps: TaxColumnMap[] = [
+      { type: "PPN Keluaran", dpp: 2, pajak: 3, ntpn: 7 },
+      { type: "PPN Masukan", dpp: 4, pajak: 5, ntpn: 7 },
+      { type: "Pembayaran PPN", dpp: 6, pajak: 6, ntpn: 7 },
+    ];
+    if (!clean(masa) && !maps.some((map) => hasTaxSignal(row, map))) return;
+    maps.forEach((map) => {
+      if (!hasTaxSignal(row, map)) { skipped += 1; return; }
+      records.push(makeExcelRecord({ sheet, rowIndex: sourceRow, company, masa, type: map.type, dpp: cell(row, map.dpp), pajak: cell(row, map.pajak), ntpn: cell(row, map.ntpn) }));
+    });
+  });
+  return { records, skipped };
 }
 function parseWorkbook(wb: XLSX.WorkBook): ParseResult {
   const errors: string[] = [];
+  const warnings: string[] = [];
   const sheetsRead: string[] = [];
-  const records = wb.SheetNames.flatMap((sheet) => {
-    const aoa = XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheet], { header: 1, blankrows: false });
-    const headerRow = aoa.findIndex((row) => row.some((cell) => /perusahaan|company|masa|jenis pajak|dpp|ntpn|ntpd/i.test(clean(cell))));
-    const headers = headerRow >= 0 ? aoa[headerRow].map(clean) : undefined;
-    const parsed = aoa.slice(headerRow >= 0 ? headerRow + 1 : 1).filter(hasSignal).flatMap((row, i) => rowToRecords(row, sheet, i + (headerRow >= 0 ? headerRow + 1 : 1), headers));
-    if (parsed.length) sheetsRead.push(sheet); else errors.push(`Sheet "${sheet}" tidak menghasilkan transaksi. Pastikan kolom Perusahaan, Masa Pajak, Jenis Pajak, DPP, Pajak Terhutang, dan NTPN/NTPD tersedia.`);
-    return parsed;
+  let skipped = 0;
+  const records: TaxTransaction[] = [];
+  const read = (sheet: string) => XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[sheet], { header: 1, blankrows: false, defval: "", raw: false });
+  const pphRestoMaps: TaxColumnMap[] = [
+    { type: "PPh Pasal 21", dpp: 2, pajak: 3, ntpn: 4 }, { type: "PPh Pasal 23", dpp: 5, pajak: 6, ntpn: 7 }, { type: "PPh Final 4(2)", dpp: 8, pajak: 9, ntpn: 10 }, { type: "PB1", dpp: 11, pajak: 12, ntpn: 13 }, { type: "PPh UMKM", dpp: 14, pajak: 15, ntpn: 16 },
+  ];
+  const pph1001Maps: TaxColumnMap[] = pphRestoMaps.filter((map) => map.type !== "PB1").map((map) => map.type === "PPh UMKM" ? { ...map, dpp: 11, pajak: 12, ntpn: 13 } : map);
+  const obsMaps: TaxColumnMap[] = [
+    { type: "PPh Pasal 21", dpp: 3, pajak: 4, ntpn: 5 }, { type: "PPh Pasal 23", dpp: 6, pajak: 7, ntpn: 8 }, { type: "PPh Final 4(2)", dpp: 9, pajak: 10, ntpn: 11 }, { type: "PPh UMKM", dpp: 12, pajak: 13, ntpn: 14 }, { type: "PB1", dpp: 15, pajak: 16, ntpn: 17 },
+  ];
+  const parsers: Record<string, () => { records: TaxTransaction[]; skipped: number }> = {
+    "PPH-Resto": () => parsePphRows(read("PPH-Resto"), "PPH-Resto", 5, 0, 1, pphRestoMaps),
+    "PPN-1001": () => parsePpn1001(read("PPN-1001"), "PPN-1001"),
+    "PPH-1001": () => parsePphRows(read("PPH-1001"), "PPH-1001", 5, 0, 1, pph1001Maps),
+    "PPH-OBS": () => parsePphRows(read("PPH-OBS"), "PPH-OBS", 6, 1, 2, obsMaps),
+  };
+  Object.entries(parsers).forEach(([sheet, parser]) => {
+    if (!wb.SheetNames.includes(sheet)) { warnings.push(`Sheet "${sheet}" tidak ditemukan.`); return; }
+    const parsed = parser();
+    if (parsed.records.length) sheetsRead.push(sheet); else errors.push(`Sheet "${sheet}" tidak menghasilkan transaksi.`);
+    records.push(...parsed.records);
+    skipped += parsed.skipped;
   });
+  records.forEach((record) => warnings.push(...validateImportedRecord(record)));
   if (!records.length) errors.push("Tidak ada data pajak yang berhasil dinormalisasi dari workbook.");
-  return { records, errors, sheetsRead };
+  return { records, errors, warnings, sheetsRead, skipped };
 }
 function rupiah(value: number) { return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value || 0); }
 function plainNumber(value: number) { return new Intl.NumberFormat("id-ID").format(value || 0); }
@@ -226,20 +269,25 @@ export function TaxCoordinatorDashboard() {
   const [filters, setFilters] = useState<Filters>({ tahun: ALL, masaPajak: ALL, perusahaan: ALL, jenisPajak: ALL, status: ALL, search: "" });
   const [message, setMessage] = useState("Mode file statis aktif. Data utama dibaca dari /public/data/tax-data.json.");
   const [error, setError] = useState("");
+  const [importMode, setImportMode] = useState<"replace" | "append">("replace");
+  const [uploadSummary, setUploadSummary] = useState<UploadSummary>(null);
   const [modalOpen, setModalOpen] = useState(false);
   const [form, setForm] = useState<ManualForm>(emptyManualForm("dashboard"));
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
+  const storageHydrated = useRef(false);
   async function refreshData() {
     setLoading(true); setError(""); setMessage("Memuat data pajak dari file statis...");
     const [taxData, history] = await Promise.all([loadStaticTaxData(), loadStaticUploadHistory()]);
-    setStaticRecords(taxData); setUploadBatches(history);
+    setStaticRecords(taxData); setUploadBatches((current) => [...current, ...history.filter((item) => !current.some((existing) => existing.id === item.id))]);
     setMessage(taxData.length ? "Mode file statis aktif. Data utama dibaca dari /public/data/tax-data.json." : "Belum ada data. Silakan upload Excel atau update file data statis.");
     setLoading(false);
   }
-  useEffect(() => { const saved = localStorage.getItem(FILTER_STORAGE_KEY); if (saved) { const parsed = JSON.parse(saved) as Partial<Filters>; setFilters({ tahun: parsed.tahun ?? ALL, masaPajak: parsed.masaPajak ?? ALL, perusahaan: parsed.perusahaan ?? ALL, jenisPajak: parsed.jenisPajak ?? ALL, status: parsed.status ?? ALL, search: parsed.search ?? "" }); } const manual = localStorage.getItem("tax-dashboard-manual-records-v1"); if (manual) setManualRecords(JSON.parse(manual).map(normalizeStaticEntry)); refreshData(); }, []);
+  useEffect(() => { const saved = localStorage.getItem(FILTER_STORAGE_KEY); if (saved) { const parsed = JSON.parse(saved) as Partial<Filters>; setFilters({ tahun: parsed.tahun ?? ALL, masaPajak: parsed.masaPajak ?? ALL, perusahaan: parsed.perusahaan ?? ALL, jenisPajak: parsed.jenisPajak ?? ALL, status: parsed.status ?? ALL, search: parsed.search ?? "" }); } const manual = localStorage.getItem("tax-dashboard-manual-records-v1"); if (manual) setManualRecords(JSON.parse(manual).map(normalizeStaticEntry)); const uploaded = localStorage.getItem(UPLOAD_STORAGE_KEY); if (uploaded) setUploadRecords(JSON.parse(uploaded).map(normalizeStaticEntry)); const history = localStorage.getItem(UPLOAD_HISTORY_STORAGE_KEY); if (history) setUploadBatches(JSON.parse(history)); storageHydrated.current = true; refreshData(); }, []);
   useEffect(() => localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(filters)), [filters]);
-  useEffect(() => localStorage.setItem("tax-dashboard-manual-records-v1", JSON.stringify(manualRecords.map(toStaticEntry))), [manualRecords]);
+  useEffect(() => { if (storageHydrated.current) localStorage.setItem("tax-dashboard-manual-records-v1", JSON.stringify(manualRecords.map(toStaticEntry))); }, [manualRecords]);
+  useEffect(() => { if (storageHydrated.current) localStorage.setItem(UPLOAD_STORAGE_KEY, JSON.stringify(uploadRecords.map(toStaticEntry))); }, [uploadRecords]);
+  useEffect(() => { if (storageHydrated.current) localStorage.setItem(UPLOAD_HISTORY_STORAGE_KEY, JSON.stringify(uploadBatches)); }, [uploadBatches]);
 
   const records = useMemo(() => [...staticRecords, ...uploadRecords, ...manualRecords], [staticRecords, uploadRecords, manualRecords]);
   const baseRows = useMemo(() => pageMeta[page].types ? records.filter((r) => pageMeta[page].types?.includes(r.jenisPajak)) : records, [page, records]);
@@ -254,7 +302,7 @@ export function TaxCoordinatorDashboard() {
   function deleteBatch(id: string) { if (!confirm("Hapus riwayat dan data upload sementara ini dari browser?")) return; setUploadBatches((rows) => rows.filter((row) => row.id !== id)); setUploadRecords((rows) => rows.filter((row) => row.uploadBatchId !== id)); }
   function importExcel(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader();
-    reader.onload = async () => { setBusy(true); setMessage("Memproses Excel..."); try { const result = parseWorkbook(XLSX.read(reader.result, { type: "array", cellDates: false })); setError(result.errors.join(" ")); const batchId = `upload-${crypto.randomUUID()}`; const rows = result.records.map((row) => ({ ...row, id: `${batchId}-${row.id}`, uploadBatchId: batchId, sourceData: "Excel Import" as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() })); const duplicate = uploadBatches.find((b) => b.file_name === file.name && b.total_rows === result.records.length); if (duplicate && !confirm("File dengan nama dan jumlah baris yang sama pernah diupload di sesi/file statis. Tetap tampilkan sebagai batch baru?")) return; setUploadRecords((current) => confirm("Gabungkan data Excel dengan data yang sedang tampil?") ? [...current, ...rows] : rows); setUploadBatches((current) => [{ id: batchId, file_name: file.name, uploaded_at: new Date().toISOString(), total_rows: rows.length, uploaded_by: "browser-session", status: "success", error_message: result.errors.join(" ") }, ...current]); setMessage("Excel berhasil dinormalisasi untuk preview sesi browser."); } catch (err) { console.error("[tax-dashboard] Gagal memproses upload Excel", err); setError(err instanceof Error ? err.message : "Data Excel gagal diproses."); } finally { setBusy(false); } };
+    reader.onload = async () => { setBusy(true); setMessage("Memproses Excel..."); setUploadSummary(null); try { const result = parseWorkbook(XLSX.read(reader.result, { type: "array", cellDates: false, cellNF: false, cellText: true })); setError(result.errors.join(" ")); const batchId = `upload-${crypto.randomUUID()}`; const now = new Date().toISOString(); const rows = result.records.map((row) => ({ ...row, id: `${batchId}-${row.id}`, uploadBatchId: batchId, sourceData: "Excel Import" as const, createdAt: now, updatedAt: now })); setUploadRecords((current) => importMode === "append" ? [...current, ...rows] : rows); setUploadBatches((current) => [{ id: batchId, file_name: file.name, uploaded_at: now, total_rows: rows.length, uploaded_by: "browser-localStorage", status: result.errors.length ? "warning" : "success", error_message: [...result.errors, ...result.warnings.slice(0, 8)].join(" ") }, ...(importMode === "append" ? current : [])]); setUploadSummary({ filename: file.name, imported: rows.length, skipped: result.skipped, warnings: result.warnings, errors: result.errors, mode: importMode }); setMessage(`Excel berhasil dinormalisasi dari ${result.sheetsRead.join(", ") || "workbook"} dan disimpan ke localStorage.`); } catch (err) { console.error("[tax-dashboard] Gagal memproses upload Excel", err); const text = err instanceof Error ? err.message : "Data Excel gagal diproses."; setError(text); setUploadSummary({ filename: file.name, imported: 0, skipped: 0, warnings: [], errors: [text], mode: importMode }); } finally { setBusy(false); } };
     reader.readAsArrayBuffer(file); event.target.value = "";
   }
 
@@ -264,10 +312,11 @@ export function TaxCoordinatorDashboard() {
       <header className="sticky top-0 z-20 border-b border-[#D8E0EA] bg-[#EEF3F8]/90 px-4 py-3 backdrop-blur lg:hidden"><Button variant="outline" onClick={() => setDrawerOpen(true)}><Menu className="h-4 w-4" /> Menu</Button></header>
       <section className="space-y-6 p-4 sm:p-6 xl:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1><p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p></div>{isManualPage(page) && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
-        <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: options("tahun"), masaPajak: options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} />
+        <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: options("tahun"), masaPajak: options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES }} importMode={importMode} setImportMode={setImportMode} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} />
         <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
         <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{loading ? "Memuat data pajak..." : message}{!records.length && !loading && " KPI akan menampilkan 0 sampai data tersedia."}</div>
         {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
+        {uploadSummary && <UploadSummaryCard summary={uploadSummary} />}
         <UploadHistory batches={uploadBatches} onDelete={deleteBatch} />
         {page === "documents" ? <Documents rows={filtered} /> : <><KpiGrid items={buildKpis(page, filtered)} /><DataQuality rows={filtered} /><TransactionTable rows={filtered} title={page === "dashboard" ? "Resume Pembayaran Pajak" : `Tabel detail ${meta.title}`} onEdit={openManual} onDelete={deleteManual} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} /></>}
       </section>
@@ -282,9 +331,9 @@ function Sidebar({ page, setPage, open, setOpen }: { page: Page; setPage: (page:
     <nav className="space-y-2">{navItems.map(([id, Icon, label]) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition", page === id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white")}><Icon className="h-5 w-5" />{label}</button>)}</nav>
   </aside>;
 }
-function FilterBar({ filters, updateFilter, options, onUpload, onManual }: { filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; options: { tahun: string[]; masaPajak: string[]; perusahaan: string[]; jenisPajak: readonly string[]; status: readonly string[] }; onUpload: () => void; onManual: () => void }) {
+function FilterBar({ filters, updateFilter, options, importMode, setImportMode, onUpload, onManual }: { filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; options: { tahun: string[]; masaPajak: string[]; perusahaan: string[]; jenisPajak: readonly string[]; status: readonly string[] }; importMode: "replace" | "append"; setImportMode: (mode: "replace" | "append") => void; onUpload: () => void; onManual: () => void }) {
   const selects: [keyof Filters, string, readonly string[]][] = [["tahun", "Semua Tahun", options.tahun], ["masaPajak", "Semua Masa Pajak", options.masaPajak], ["perusahaan", "Semua Perusahaan", options.perusahaan], ["jenisPajak", "Semua Jenis Pajak", options.jenisPajak], ["status", "Semua Status", options.status]];
-  return <Card className="rounded-3xl border-[#D8E0EA] shadow-sm"><CardContent className="flex flex-wrap items-center gap-3 p-4">{selects.map(([key, placeholder, values]) => <Select key={key} value={filters[key]} onChange={(e) => updateFilter(key, e.target.value)} className="h-11 min-w-0 flex-1 basis-full rounded-2xl bg-white sm:basis-[calc(50%-0.75rem)] lg:basis-44"><option value={ALL}>{placeholder}</option>{values.map((v) => <option key={v} value={v}>{v}</option>)}</Select>)}<div className="relative min-w-0 flex-1 basis-full lg:basis-72"><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" /><Input value={filters.search} onChange={(e) => updateFilter("search", e.target.value)} placeholder="Cari perusahaan, NTPN, jenis pajak..." className="h-11 rounded-2xl bg-white pl-9" /></div><div className="flex w-full flex-wrap gap-3 sm:w-auto sm:flex-nowrap"><Button onClick={onUpload} className="h-11 flex-1 rounded-2xl bg-blue-600 font-bold hover:bg-blue-700 sm:flex-none"><Upload className="h-4 w-4" /> Upload Excel</Button><Button onClick={onManual} variant="outline" className="h-11 flex-1 rounded-2xl font-bold sm:flex-none"><Plus className="h-4 w-4" /> Manual</Button></div></CardContent></Card>;
+  return <Card className="rounded-3xl border-[#D8E0EA] shadow-sm"><CardContent className="flex flex-wrap items-center gap-3 p-4">{selects.map(([key, placeholder, values]) => <Select key={key} value={filters[key]} onChange={(e) => updateFilter(key, e.target.value)} className="h-11 min-w-0 flex-1 basis-full rounded-2xl bg-white sm:basis-[calc(50%-0.75rem)] lg:basis-44"><option value={ALL}>{placeholder}</option>{values.map((v) => <option key={v} value={v}>{v}</option>)}</Select>)}<div className="relative min-w-0 flex-1 basis-full lg:basis-72"><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" /><Input value={filters.search} onChange={(e) => updateFilter("search", e.target.value)} placeholder="Cari perusahaan, NTPN, jenis pajak..." className="h-11 rounded-2xl bg-white pl-9" /></div><div className="flex w-full flex-wrap items-center gap-3 sm:w-auto"><Select value={importMode} onChange={(e) => setImportMode(e.target.value as "replace" | "append")} className="h-11 rounded-2xl bg-white sm:w-52"><option value="replace">Replace existing data</option><option value="append">Append data</option></Select><Button onClick={onUpload} className="h-11 flex-1 rounded-2xl bg-blue-600 font-bold hover:bg-blue-700 sm:flex-none"><Upload className="h-4 w-4" /> Upload Excel</Button><Button onClick={onManual} variant="outline" className="h-11 flex-1 rounded-2xl font-bold sm:flex-none"><Plus className="h-4 w-4" /> Manual</Button></div></CardContent></Card>;
 }
 function buildKpis(page: Page, rows: TaxTransaction[]): KpiItem[] {
   if (page === "ppn") return [{ label: "Total PPN Keluaran", value: sum(rows, "PPN Keluaran"), money: true }, { label: "Total PPN Masukan", value: sum(rows, "PPN Masukan"), money: true }, { label: "PM Tidak Dikreditkan", value: sum(rows, "PM Tidak Dikreditkan"), money: true }, { label: "Kurang Bayar/Lebih Bayar", value: sum(rows, "Pembayaran PPN") + sum(rows, "PPN"), money: true }, { label: "Total Pembayaran PPN", value: sum(rows, "Pembayaran PPN") + sum(rows, "PPN"), money: true }];
@@ -306,6 +355,11 @@ function ManualModal({ page, form, setForm, errors, onClose, onSave, saving }: {
   const taxOptions = page === "ppn" ? ["PPN"] : page === "pb1" ? ["PB1"] : page === "dashboard" ? ["PPN", ...PPH_TYPES, "PB1"] : PPH_TYPES;
   const field = (key: keyof ManualForm, label: string, type = "text") => <div><label className="text-xs font-extrabold uppercase text-slate-500">{label}</label><Input type={type} value={String(form[key] ?? "")} onChange={(e) => set(key, e.target.value)} className="mt-1 h-11 rounded-2xl" />{errors[key] && <p className="mt-1 text-xs font-semibold text-red-600">{errors[key]}</p>}</div>;
   return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/40 p-4"><div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl"><div className="mb-5 flex items-center justify-between"><div><h2 className="text-2xl font-black">{form.id ? "Edit Data Pajak Manual" : manualButtonLabel(page)}</h2><p className="text-sm font-medium text-slate-500">Source Data dan Source Sheet otomatis disimpan sebagai Manual Input.</p><p className="mt-2 rounded-2xl bg-blue-50 p-3 text-xs font-semibold text-blue-700">Tanpa database, data manual hanya tersimpan di browser ini. Source Data dan Source Sheet tetap disimpan sebagai informasi internal saat data diekspor oleh admin.</p></div><Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div><div className="grid gap-4 md:grid-cols-2">{field("perusahaan", "Perusahaan")}{field("tahun", "Tahun")}{field("masaPajak", "Masa Pajak")}<div><label className="text-xs font-extrabold uppercase text-slate-500">Jenis Pajak</label><Select value={form.jenisPajak} onChange={(e) => set("jenisPajak", e.target.value)} className="mt-1 h-11 rounded-2xl">{taxOptions.map((t) => <option key={t} value={t}>{t}</option>)}</Select>{errors.jenisPajak && <p className="mt-1 text-xs font-semibold text-red-600">{errors.jenisPajak}</p>}</div>{form.jenisPajak === "PPN" ? <>{field("ppnKeluaran", "PPN Keluaran")}{field("ppnMasukan", "PPN Masukan")}{field("pmTidakDikreditkan", "PM Tidak Dikreditkan")}<div><label className="text-xs font-extrabold uppercase text-slate-500">Kurang Bayar / Lebih Bayar</label><Input value={rupiah(ppnComputed)} readOnly className="mt-1 h-11 rounded-2xl bg-slate-50" /></div>{field("totalPembayaranPpn", "Total Pembayaran PPN")}</> : <>{field("dpp", form.jenisPajak === "PB1" ? "DPP PB 1" : "DPP")}{field("pajak", form.jenisPajak === "PB1" ? "Nilai PB 1" : "Nilai Pajak / Pajak Terutang")}</>}{field("ntpnNtpd", form.jenisPajak === "PB1" ? "NTPD" : "NTPN/NTPD")}{field("tanggalBayar", "Tanggal Bayar", "date")}<div><label className="text-xs font-extrabold uppercase text-slate-500">Status Manual (opsional)</label><Select value={form.status} onChange={(e) => set("status", e.target.value)} className="mt-1 h-11 rounded-2xl"><option value="">Gunakan status otomatis</option>{STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}</Select></div><div className="md:col-span-2">{field("keterangan", "Keterangan")}</div></div><div className="mt-6 flex justify-end gap-3"><Button variant="outline" className="rounded-2xl" onClick={onClose}>Batal</Button><Button className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700" onClick={onSave} disabled={saving}>{saving ? "Menyimpan..." : form.id ? "Simpan Perubahan" : "Simpan"}</Button></div></div></div>;
+}
+
+function UploadSummaryCard({ summary }: { summary: NonNullable<UploadSummary> }) {
+  const issues = [...summary.errors, ...summary.warnings];
+  return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Upload Summary</CardTitle><CardDescription>{summary.mode === "replace" ? "Replace existing data" : "Append data"} • file tersimpan di localStorage agar tetap ada setelah refresh.</CardDescription></CardHeader><CardContent className="space-y-2 text-sm font-semibold text-slate-700"><p>Filename: <span className="font-black">{summary.filename}</span></p><p>Total records imported: <span className="font-black">{plainNumber(summary.imported)}</span></p><p>Records skipped: <span className="font-black">{plainNumber(summary.skipped)}</span></p><div><p className="font-black">Errors / Warnings:</p>{issues.length ? <ul className="mt-2 max-h-36 list-disc overflow-y-auto pl-5 text-xs text-amber-700">{issues.slice(0, 30).map((issue, index) => <li key={`${issue}-${index}`}>{issue}</li>)}{issues.length > 30 && <li>{issues.length - 30} warning lainnya disembunyikan.</li>}</ul> : <p className="text-xs text-emerald-700">Tidak ada error atau warning validasi.</p>}</div></CardContent></Card>;
 }
 function UploadHistory({ batches, onDelete }: { batches: UploadBatch[]; onDelete: (id: string) => void }) {
   return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Riwayat Upload Excel</CardTitle><CardDescription>{batches.length ? `${batches.length} batch upload dari file statis/sesi browser.` : "Belum ada upload Excel yang tersimpan di file statis."}</CardDescription></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Nama File", "Tanggal Upload", "Jumlah Baris", "Status", "Error", "Aksi"].map((h) => <TableHead key={h} className="text-xs uppercase text-slate-500">{h}</TableHead>)}</TableRow></TableHeader><TableBody>{batches.length ? batches.map((b) => <TableRow key={b.id}><TableCell className="font-semibold">{b.file_name}</TableCell><TableCell>{new Date(b.uploaded_at).toLocaleString("id-ID")}</TableCell><TableCell>{plainNumber(b.total_rows)}</TableCell><TableCell><Badge variant={b.status === "success" ? "success" : "warning"}>{b.status}</Badge></TableCell><TableCell className="max-w-md truncate">{b.error_message || "-"}</TableCell><TableCell><Button size="sm" variant="outline" onClick={() => onDelete(b.id)}><Trash2 className="h-3 w-3" /> Hapus Data Upload Ini</Button></TableCell></TableRow>) : <TableRow><TableCell colSpan={6} className="h-20 text-center text-sm font-semibold text-slate-500">Belum ada upload Excel yang tersimpan di file statis. Upload di browser akan tampil sementara di sini dan bisa diekspor ke upload-history.json.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>;
