@@ -3,7 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { parseTaxWorkbook, type TaxRecord } from "@/src/lib/parseTaxWorkbook";
-import { Building2, CheckCircle2, Download, Edit3, FileArchive, FileSpreadsheet, Home, Menu, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
+import { Building2, CheckCircle2, Download, Edit3, Eye, FileArchive, FileSpreadsheet, Home, Menu, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,7 +52,7 @@ type TaxTransaction = {
 
 type Filters = { tahun: string; masaPajak: string; perusahaan: string; jenisPajak: string; status: string; search: string };
 type UploadBatch = { id: string; file_name: string; uploaded_at: string; total_rows: number; uploaded_by: string; status: string; error_message: string };
-type UploadedPdfDocument = { id: string; name: string; uploadedAt: string | null; size: number; url: string };
+type UploadedPdfDocument = { id: string; name: string; uploadedAt: string | null; size: number; type?: string; url: string };
 type StaticTaxEntry = { id?: string; perusahaan?: string; tahun?: string; masaPajak?: string; masa_pajak?: string; jenisPajak?: TaxType; jenis_pajak?: TaxType; dpp?: number | string; pajak?: number | string; pajakTerhutang?: number | string; ntpnNtpd?: string; ntpn_ntpd?: string; tanggalBayar?: string | null; tanggal_bayar?: string | null; ppnKeluaran?: number | string; ppn_keluaran?: number | string; ppnMasukan?: number | string; ppn_masukan?: number | string; pmTidakDikreditkan?: number | string; pm_tidak_dikreditkan?: number | string; status?: string; statusAuto?: string; status_auto?: string; keterangan?: string; sourceData?: "Static File" | "Excel Import" | "Manual Input"; source_data?: "Static File" | "Excel Import" | "Manual Input"; sourceSheet?: string; source_sheet?: string; sourceRow?: number; source_row?: number; uploadBatchId?: string | null; upload_batch_id?: string | null; createdAt?: string; created_at?: string; updatedAt?: string; updated_at?: string };
 
 type SummaryOverrides = Record<string, number>;
@@ -325,7 +325,7 @@ export function TaxCoordinatorDashboard() {
   function deleteBatch(id: string) { if (!confirm("Hapus riwayat upload dari tampilan? Data record tetap ada sampai dihapus per record.")) return; setUploadBatches((rows) => rows.filter((row) => row.id !== id)); }
   async function uploadPdf(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; if (!file) return;
-    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) { setError("Upload ditolak. Hanya file PDF (.pdf) yang diperbolehkan."); event.target.value = ""; return; }
+    if (file.type !== "application/pdf" && !(file.type === "" && file.name.toLowerCase().endsWith(".pdf"))) { setError("File harus berformat PDF."); event.target.value = ""; return; }
     setPdfUploading(true); setError("");
     try {
       const formData = new FormData();
@@ -333,8 +333,8 @@ export function TaxCoordinatorDashboard() {
       const response = await fetch("/api/tax-documents", { method: "POST", body: formData });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Upload PDF gagal.");
-      setPdfDocuments((current) => [payload.document, ...current].filter(Boolean));
-      setMessage(`PDF ${file.name} berhasil diupload.`);
+      await loadPdfDocuments();
+      setMessage("Upload PDF berhasil dan tersimpan ke cloud.");
     } catch (err) { setError(err instanceof Error ? err.message : "Upload PDF gagal."); } finally { setPdfUploading(false); event.target.value = ""; }
   }
   function importExcel(event: ChangeEvent<HTMLInputElement>) {
@@ -417,5 +417,5 @@ function UploadHistory({ batches, onDelete }: { batches: UploadBatch[]; onDelete
 }
 
 function Documents({ documents, uploading, onUpload }: { documents: UploadedPdfDocument[]; uploading: boolean; onUpload: () => void }) {
-  return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div><CardTitle>Dokumen Pajak</CardTitle><CardDescription>{documents.length} file PDF sudah diupload.</CardDescription></div><Button onClick={onUpload} disabled={uploading} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Upload className="h-4 w-4" /> {uploading ? "Mengupload..." : "Upload PDF"}</Button></div></CardHeader><CardContent className="space-y-3">{documents.length ? documents.map((doc) => <div key={doc.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"><div><p className="font-bold text-slate-950">{doc.name}</p><p className="text-sm text-slate-500">{doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleString("id-ID") : "Tanggal upload tidak tersedia"} • {fileSize(doc.size)}</p></div><a href={doc.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-950 shadow-sm hover:bg-slate-50"><Download className="h-3 w-3" /> Lihat/Download</a></div>) : <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center font-semibold text-slate-500">Belum ada PDF yang diupload. Klik Upload PDF untuk menambahkan dokumen pajak.</div>}</CardContent></Card>;
+  return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div><CardTitle>Dokumen Pajak</CardTitle><CardDescription>{documents.length} file PDF sudah diupload dari cloud.</CardDescription></div><Button onClick={onUpload} disabled={uploading} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Upload className="h-4 w-4" /> {uploading ? "Mengupload..." : "Upload PDF"}</Button></div></CardHeader><CardContent className="space-y-3">{documents.length ? documents.map((doc) => <div key={doc.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"><div><p className="font-bold text-slate-950">{doc.name}</p><p className="text-sm text-slate-500">{doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleString("id-ID") : "Tanggal upload tidak tersedia"} • {fileSize(doc.size)}{doc.type ? ` • ${doc.type}` : ""}</p></div><div className="flex flex-wrap gap-2"><a href={doc.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-950 shadow-sm hover:bg-slate-50"><Eye className="h-3 w-3" /> Lihat</a><a href={doc.url} download={doc.name} className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-950 shadow-sm hover:bg-slate-50"><Download className="h-3 w-3" /> Download</a></div></div>) : <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center font-semibold text-slate-500">Belum ada PDF yang diupload. Klik Upload PDF untuk menambahkan dokumen pajak.</div>}</CardContent></Card>;
 }

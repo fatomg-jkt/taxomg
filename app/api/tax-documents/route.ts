@@ -1,72 +1,139 @@
-import { list, put } from "@vercel/blob";
+import { get, put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
 const noStoreHeaders = { "Cache-Control": "no-store" };
 const prefix = "tax-documents/";
+const metadataPathname = "documents-pdf.json";
 
 export const dynamic = "force-dynamic";
 
-type BlobListItem = {
-  pathname: string;
+type UploadedPdfDocument = {
+  id: string;
+  name: string;
+  uploadedAt: string;
+  size: number;
+  type: string;
   url: string;
-  downloadUrl?: string;
-  size?: number;
-  uploadedAt?: Date | string;
 };
 
-function storeId() {
-  return process.env.TAXOMG_STORE_ID;
+type DocumentsPayload = { documents?: UploadedPdfDocument[] };
+
+function blobOptions() {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  const storeId = process.env.TAXOMG_STORE_ID;
+  return { token, storeId };
 }
 
-function documentName(pathname: string) {
-  const withoutPrefix = pathname.startsWith(prefix) ? pathname.slice(prefix.length) : pathname;
-  const parts = withoutPrefix.split("-");
-  return decodeURIComponent(parts.length > 1 ? parts.slice(1).join("-") : withoutPrefix);
+function hasBlobConfig() {
+  const { token, storeId } = blobOptions();
+  return Boolean(token || storeId);
 }
 
-function mapBlob(blob: BlobListItem) {
-  return {
-    id: blob.pathname,
-    name: documentName(blob.pathname),
-    uploadedAt: blob.uploadedAt ? new Date(blob.uploadedAt).toISOString() : null,
-    size: blob.size ?? 0,
-    url: blob.downloadUrl ?? blob.url,
-  };
+function blobConfigError() {
+  return process.env.BLOB_READ_WRITE_TOKEN ? "Konfigurasi Blob belum tersedia." : "Token Blob belum tersedia.";
+}
+
+function sanitizeFileName(name: string) {
+  return name.replace(/[^a-zA-Z0-9._ -]/g, "_").replace(/\s+/g, " ").trim() || "dokumen.pdf";
+}
+
+function isPdfFile(file: File) {
+  const lowerName = file.name.toLowerCase();
+  return file.type === "application/pdf" || (!file.type && lowerName.endsWith(".pdf"));
+}
+
+function normalizeDocuments(payload: DocumentsPayload): UploadedPdfDocument[] {
+  return Array.isArray(payload.documents)
+    ? payload.documents.filter((doc) => doc && doc.id && doc.name && doc.url)
+    : [];
+}
+
+async function readMetadata(): Promise<UploadedPdfDocument[]> {
+  const options = blobOptions();
+  const result = await get(metadataPathname, { access: "private", ...options });
+  if (result?.statusCode !== 200 || !result.stream) return [];
+
+  const text = await new Response(result.stream).text();
+  if (!text.trim()) return [];
+
+  const payload = JSON.parse(text) as DocumentsPayload;
+  return normalizeDocuments(payload);
+}
+
+async function writeMetadata(documents: UploadedPdfDocument[]) {
+  const body = JSON.stringify({ documents, updatedAt: new Date().toISOString() }, null, 2);
+  return put(metadataPathname, body, {
+    access: "private",
+    contentType: "application/json",
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    ...blobOptions(),
+  });
 }
 
 export async function GET() {
-  const currentStoreId = storeId();
-  if (!currentStoreId) return NextResponse.json({ documents: [] }, { headers: noStoreHeaders });
+  if (!hasBlobConfig()) return NextResponse.json({ documents: [] }, { headers: noStoreHeaders });
 
   try {
-    const result = await list({ prefix, storeId: currentStoreId });
-    return NextResponse.json({ documents: result.blobs.map(mapBlob) }, { headers: noStoreHeaders });
+    const documents = await readMetadata();
+    return NextResponse.json({ documents }, { headers: noStoreHeaders });
   } catch (error) {
-    console.error("[tax-documents] Failed to list PDF documents", error);
+    console.error("[tax-documents] Failed to read PDF metadata from Vercel Blob", error);
     return NextResponse.json({ documents: [] }, { headers: noStoreHeaders });
   }
 }
 
 export async function POST(request: Request) {
-  const currentStoreId = storeId();
-  if (!currentStoreId) return NextResponse.json({ ok: false, error: "Missing TAXOMG_STORE_ID" }, { status: 500 });
+  if (!hasBlobConfig()) {
+    console.error("[tax-documents] Missing Vercel Blob configuration. Set BLOB_READ_WRITE_TOKEN or TAXOMG_STORE_ID on the server.");
+    return NextResponse.json({ ok: false, error: blobConfigError() }, { status: 500 });
+  }
 
-  const formData = await request.formData().catch(() => null);
+  const formData = await request.formData().catch((error) => {
+    console.error("[tax-documents] Failed to parse multipart form data", error);
+    return null;
+  });
   const file = formData?.get("file");
   if (!(file instanceof File)) return NextResponse.json({ ok: false, error: "File PDF wajib dipilih." }, { status: 400 });
 
-  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  if (!isPdf) return NextResponse.json({ ok: false, error: "Upload ditolak. Hanya file PDF (.pdf) yang diperbolehkan." }, { status: 400 });
+  if (!isPdfFile(file)) return NextResponse.json({ ok: false, error: "File harus berformat PDF." }, { status: 400 });
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._ -]/g, "_");
-  const pathname = `${prefix}${Date.now()}-${safeName}`;
-  const blob = await put(pathname, file, {
-    access: "public",
-    contentType: "application/pdf",
-    addRandomSuffix: false,
-    allowOverwrite: false,
-    storeId: currentStoreId,
-  });
+  const uploadedAt = new Date().toISOString();
+  const id = `pdf-${crypto.randomUUID()}`;
+  const safeName = sanitizeFileName(file.name);
+  const pathname = `${prefix}${id}-${safeName}`;
 
-  return NextResponse.json({ ok: true, document: mapBlob({ pathname, url: blob.url, size: file.size, uploadedAt: new Date().toISOString() }) }, { status: 201 });
+  let blobUrl = "";
+  try {
+    const blob = await put(pathname, file, {
+      access: "public",
+      contentType: "application/pdf",
+      addRandomSuffix: false,
+      allowOverwrite: false,
+      ...blobOptions(),
+    });
+    blobUrl = blob.url;
+  } catch (error) {
+    console.error("[tax-documents] Failed to upload PDF to Vercel Blob", { pathname, size: file.size, type: file.type, error });
+    return NextResponse.json({ ok: false, error: "Gagal upload ke Vercel Blob." }, { status: 500 });
+  }
+
+  const document: UploadedPdfDocument = {
+    id,
+    name: safeName,
+    uploadedAt,
+    size: file.size,
+    type: file.type || "application/pdf",
+    url: blobUrl,
+  };
+
+  try {
+    const documents = await readMetadata();
+    await writeMetadata([document, ...documents]);
+  } catch (error) {
+    console.error("[tax-documents] Failed to save PDF metadata to Vercel Blob", { document, error });
+    return NextResponse.json({ ok: false, error: "Gagal menyimpan metadata dokumen." }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true, document }, { status: 201 });
 }
