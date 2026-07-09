@@ -3,7 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { parseTaxWorkbook, type TaxRecord } from "@/src/lib/parseTaxWorkbook";
-import { Building2, CheckCircle2, Edit3, FileArchive, FileSpreadsheet, Home, Menu, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
+import { Building2, CheckCircle2, Download, Edit3, FileArchive, FileSpreadsheet, Home, Menu, Plus, Receipt, Search, Trash2, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -52,6 +52,7 @@ type TaxTransaction = {
 
 type Filters = { tahun: string; masaPajak: string; perusahaan: string; jenisPajak: string; status: string; search: string };
 type UploadBatch = { id: string; file_name: string; uploaded_at: string; total_rows: number; uploaded_by: string; status: string; error_message: string };
+type UploadedPdfDocument = { id: string; name: string; uploadedAt: string | null; size: number; url: string };
 type StaticTaxEntry = { id?: string; perusahaan?: string; tahun?: string; masaPajak?: string; masa_pajak?: string; jenisPajak?: TaxType; jenis_pajak?: TaxType; dpp?: number | string; pajak?: number | string; pajakTerhutang?: number | string; ntpnNtpd?: string; ntpn_ntpd?: string; tanggalBayar?: string | null; tanggal_bayar?: string | null; ppnKeluaran?: number | string; ppn_keluaran?: number | string; ppnMasukan?: number | string; ppn_masukan?: number | string; pmTidakDikreditkan?: number | string; pm_tidak_dikreditkan?: number | string; status?: string; statusAuto?: string; status_auto?: string; keterangan?: string; sourceData?: "Static File" | "Excel Import" | "Manual Input"; source_data?: "Static File" | "Excel Import" | "Manual Input"; sourceSheet?: string; source_sheet?: string; sourceRow?: number; source_row?: number; uploadBatchId?: string | null; upload_batch_id?: string | null; createdAt?: string; created_at?: string; updatedAt?: string; updated_at?: string };
 
 type SummaryOverrides = Record<string, number>;
@@ -190,6 +191,7 @@ function parseWorkbook(wb: XLSX.WorkBook): ParseResult {
 }
 function rupiah(value: number) { return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value || 0); }
 function plainNumber(value: number) { return new Intl.NumberFormat("id-ID").format(value || 0); }
+function fileSize(value: number) { if (!value) return "0 B"; const units = ["B", "KB", "MB", "GB"]; const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1); return `${new Intl.NumberFormat("id-ID", { maximumFractionDigits: index ? 1 : 0 }).format(value / 1024 ** index)} ${units[index]}`; }
 function statusTone(status: string) { if (status === "Terverifikasi" || status === "Sudah ada NTPN/NTPD") return "success"; if (status === "Belum Lengkap" || status === "Belum ada NTPN/NTPD" || status === "Data kosong") return "warning"; if (status === "Lebih Bayar" || status === "Kompensasi" || status === "Lebih bayar" || status === "Kompensasi lebih bayar") return "destructive"; return "secondary"; }
 function sum(rows: TaxTransaction[], type?: TaxType) { return rows.filter((r) => !type || r.jenisPajak === type).reduce((a, r) => a + r.pajakTerhutang, 0); }
 function dpp(rows: TaxTransaction[], types?: TaxType[]) { return rows.filter((r) => !types || types.includes(r.jenisPajak)).reduce((a, r) => a + r.dpp, 0); }
@@ -255,6 +257,8 @@ export function TaxCoordinatorDashboard() {
   const [summaryOverrides, setSummaryOverrides] = useState<SummaryOverrides>({});
   const [lastSaved, setLastSaved] = useState<string | null>(null);
   const [uploadBatches, setUploadBatches] = useState<UploadBatch[]>([]);
+  const [pdfDocuments, setPdfDocuments] = useState<UploadedPdfDocument[]>([]);
+  const [pdfUploading, setPdfUploading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [page, setPage] = useState<Page>("dashboard");
@@ -266,6 +270,12 @@ export function TaxCoordinatorDashboard() {
   const [form, setForm] = useState<ManualForm>(emptyManualForm("dashboard"));
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const inputRef = useRef<HTMLInputElement>(null);
+  const pdfInputRef = useRef<HTMLInputElement>(null);
+  async function loadPdfDocuments() {
+    const response = await fetch("/api/tax-documents", { cache: "no-store" });
+    const payload = await response.json().catch(() => ({ documents: [] }));
+    setPdfDocuments(Array.isArray(payload.documents) ? payload.documents : []);
+  }
   async function refreshData() {
     setLoading(true); setError(""); setMessage("Memuat data pajak dari Vercel Blob...");
     try {
@@ -273,6 +283,7 @@ export function TaxCoordinatorDashboard() {
       const payload = await response.json().catch(() => ({ records: [], summaryOverrides: {}, updatedAt: null }));
       const loaded = Array.isArray(payload.records) ? payload.records.map(normalizeStaticEntry) : [];
       setRecords(loaded); setSummaryOverrides(payload.summaryOverrides ?? {}); setLastSaved(payload.updatedAt ?? null); setUploadBatches([]);
+      await loadPdfDocuments();
       setMessage(loaded.length ? "Data berhasil dimuat dari Blob bersama." : "Blob kosong. Dashboard tampil Rp 0 sampai data diimport/manual lalu Save to Cloud.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat data Blob.");
@@ -312,6 +323,20 @@ export function TaxCoordinatorDashboard() {
   async function saveManual() { const password = await verifyPassword(); if (!password) return; const errors = validateManualForm(form); setFormErrors(errors); if (Object.keys(errors).length) return; setBusy(true); const next = normalizeManualRecord(form); setRecords((rows) => form.id ? rows.map((row) => row.id === form.id ? next : row) : [...rows, next]); setMessage("Data manual mengubah state utama. Klik Save to Cloud agar tersimpan shared."); setModalOpen(false); setBusy(false); }
   async function deleteManual(id: string) { const password = await verifyPassword(); if (!password) return; if (!confirm("Apakah Anda yakin ingin menghapus record ini?")) return; setRecords((rows) => rows.filter((row) => row.id !== id)); setMessage("Record dihapus dari state utama. Klik Save to Cloud agar tersimpan shared."); }
   function deleteBatch(id: string) { if (!confirm("Hapus riwayat upload dari tampilan? Data record tetap ada sampai dihapus per record.")) return; setUploadBatches((rows) => rows.filter((row) => row.id !== id)); }
+  async function uploadPdf(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]; if (!file) return;
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) { setError("Upload ditolak. Hanya file PDF (.pdf) yang diperbolehkan."); event.target.value = ""; return; }
+    setPdfUploading(true); setError("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/tax-documents", { method: "POST", body: formData });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Upload PDF gagal.");
+      setPdfDocuments((current) => [payload.document, ...current].filter(Boolean));
+      setMessage(`PDF ${file.name} berhasil diupload.`);
+    } catch (err) { setError(err instanceof Error ? err.message : "Upload PDF gagal."); } finally { setPdfUploading(false); event.target.value = ""; }
+  }
   function importExcel(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; if (!file) return;
     if (!file.name.toLowerCase().endsWith(".xlsx")) { setError("Upload hanya menerima file .xlsx."); event.target.value = ""; return; }
@@ -342,10 +367,10 @@ export function TaxCoordinatorDashboard() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1>{meta.subtitle && <p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p>}</div>{isManualPage(page) && page !== "dashboard" && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
         <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: options("tahun"), masaPajak: options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard"} />
         <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
+        <Input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" onChange={uploadPdf} className="hidden" />
         <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{loading ? "Memuat data pajak..." : message}{!records.length && !loading && " KPI akan menampilkan 0 sampai data tersedia."}{lastSaved && <span className="ml-2 text-slate-500">Last saved: {new Date(lastSaved).toLocaleString("id-ID")}</span>}</div>
         {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
-        {page !== "dashboard" && <UploadHistory batches={uploadBatches} onDelete={deleteBatch} />}
-        {page === "documents" ? <Documents rows={[]} onDelete={deleteManual} /> : <><KpiGrid items={buildKpis(page, summaryRows, summaryOverrides)} onEdit={async (label, value) => { const password = await verifyPassword(); if (!password) return; const input = window.prompt(`Edit nominal ${label}`, String(value)); if (input === null) return; if (input === "") { setSummaryOverrides((cur) => { const next = { ...cur }; delete next[label]; return next; }); } else { setSummaryOverrides((cur) => ({ ...cur, [label]: numberValue(input) })); } setMessage("Override summary diubah. Klik Save to Cloud untuk persist."); }} /><DataQuality rows={summaryRows} /><TransactionTable rows={summaryRows} title={page === "dashboard" ? "Resume Pembayaran Pajak" : `Tabel detail ${meta.title}`} isDashboard={page === "dashboard"} onEdit={openManual} onDelete={deleteManual} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} /></>}
+        {page === "documents" ? <Documents documents={pdfDocuments} uploading={pdfUploading} onUpload={() => pdfInputRef.current?.click()} /> : <><KpiGrid items={buildKpis(page, summaryRows, summaryOverrides)} onEdit={async (label, value) => { const password = await verifyPassword(); if (!password) return; const input = window.prompt(`Edit nominal ${label}`, String(value)); if (input === null) return; if (input === "") { setSummaryOverrides((cur) => { const next = { ...cur }; delete next[label]; return next; }); } else { setSummaryOverrides((cur) => ({ ...cur, [label]: numberValue(input) })); } setMessage("Override summary diubah. Klik Save to Cloud untuk persist."); }} /><DataQuality rows={summaryRows} /><TransactionTable rows={summaryRows} title={page === "dashboard" ? "Resume Pembayaran Pajak" : `Tabel detail ${meta.title}`} isDashboard={page === "dashboard"} onEdit={openManual} onDelete={deleteManual} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} /></>}
       </section>
     </div>
     {modalOpen && <ManualModal page={page} form={form} setForm={setForm} errors={formErrors} onClose={() => setModalOpen(false)} onSave={saveManual} saving={busy} />}
@@ -391,7 +416,6 @@ function UploadHistory({ batches, onDelete }: { batches: UploadBatch[]; onDelete
   return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Riwayat Upload Excel</CardTitle><CardDescription>{batches.length ? `${batches.length} batch upload dari file statis/sesi browser.` : "Belum ada upload Excel yang tersimpan di file statis."}</CardDescription></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Nama File", "Tanggal Upload", "Jumlah Baris", "Status", "Error", "Aksi"].map((h) => <TableHead key={h} className="text-xs uppercase text-slate-500">{h}</TableHead>)}</TableRow></TableHeader><TableBody>{batches.length ? batches.map((b) => <TableRow key={b.id}><TableCell className="font-semibold">{b.file_name}</TableCell><TableCell>{new Date(b.uploaded_at).toLocaleString("id-ID")}</TableCell><TableCell>{plainNumber(b.total_rows)}</TableCell><TableCell><Badge variant={b.status === "success" ? "success" : "warning"}>{b.status}</Badge></TableCell><TableCell className="max-w-md truncate">{b.error_message || "-"}</TableCell><TableCell><Button size="sm" variant="outline" onClick={() => onDelete(b.id)}><Trash2 className="h-3 w-3" /> Hapus Data Upload Ini</Button></TableCell></TableRow>) : <TableRow><TableCell colSpan={6} className="h-20 text-center text-sm font-semibold text-slate-500">Belum ada upload Excel yang tersimpan di file statis. Upload di browser akan tampil sementara di sini dan bisa diekspor ke upload-history.json.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>;
 }
 
-function Documents({ rows, onDelete }: { rows: TaxTransaction[]; onDelete: (id: string) => void }) {
-  const docs = rows.filter((r) => r.ntpnNtpd || /pdf|bukti|file|dokumen|lampiran/i.test(r.keterangan));
-  return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Dokumen Pajak</CardTitle><CardDescription>{docs.length} dokumen/rujukan bukti bayar terdeteksi dari data terfilter.</CardDescription></CardHeader><CardContent className="space-y-3">{docs.length ? docs.map((r) => <div key={r.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"><div><p className="font-bold text-slate-950">{r.perusahaan} — {r.jenisPajak}</p><p className="text-sm text-slate-500">{r.masaPajak} • {r.sourceSheet} baris {r.sourceRow}</p></div><div className="flex flex-wrap items-center gap-2"><Badge variant={r.ntpnNtpd ? "success" : "secondary"}>{r.ntpnNtpd || "Dokumen pendukung"}</Badge><Button size="sm" variant="outline" className="rounded-xl text-red-600 hover:text-red-700" onClick={() => onDelete(r.id)}><Trash2 className="h-3 w-3" /> Hapus</Button></div></div>) : <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center font-semibold text-slate-500">Belum ada dokumen pajak. Upload Excel dengan NTPN/NTPD, bukti bayar, PDF, atau file pendukung.</div>}</CardContent></Card>;
+function Documents({ documents, uploading, onUpload }: { documents: UploadedPdfDocument[]; uploading: boolean; onUpload: () => void }) {
+  return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between"><div><CardTitle>Dokumen Pajak</CardTitle><CardDescription>{documents.length} file PDF sudah diupload.</CardDescription></div><Button onClick={onUpload} disabled={uploading} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Upload className="h-4 w-4" /> {uploading ? "Mengupload..." : "Upload PDF"}</Button></div></CardHeader><CardContent className="space-y-3">{documents.length ? documents.map((doc) => <div key={doc.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 md:flex-row md:items-center md:justify-between"><div><p className="font-bold text-slate-950">{doc.name}</p><p className="text-sm text-slate-500">{doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleString("id-ID") : "Tanggal upload tidak tersedia"} • {fileSize(doc.size)}</p></div><a href={doc.url} target="_blank" rel="noreferrer" className="inline-flex h-9 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold text-slate-950 shadow-sm hover:bg-slate-50"><Download className="h-3 w-3" /> Lihat/Download</a></div>) : <div className="rounded-2xl border border-dashed border-slate-300 p-10 text-center font-semibold text-slate-500">Belum ada PDF yang diupload. Klik Upload PDF untuk menambahkan dokumen pajak.</div>}</CardContent></Card>;
 }
