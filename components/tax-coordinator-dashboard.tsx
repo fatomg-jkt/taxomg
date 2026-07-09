@@ -58,7 +58,7 @@ type SummaryOverrides = Record<string, number>;
 type KpiItem = { label: string; value: number; money?: boolean };
 
 const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[] }> = {
-  dashboard: { title: "Dashboard", subtitle: "Dashboard utama berisi resume; detail data berada di sidebar jenis pajak." },
+  dashboard: { title: "Dashboard Tax All Group", subtitle: "" },
   ppn: { title: "PPN", subtitle: "Monitoring PPN keluaran, masukan, PM tidak dikreditkan, dan pembayaran PPN.", types: ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN", "PPN"] },
   pph21: { title: "PPh Pasal 21", subtitle: "Detail DPP, pajak terhutang, dan kelengkapan NTPN PPh Pasal 21.", types: ["PPh Pasal 21"] },
   unifikasi: { title: "PPh Unifikasi", subtitle: "Gabungan PPh Pasal 23 dan PPh Final 4(2).", types: ["PPh Pasal 23", "PPh Final 4(2)"] },
@@ -339,12 +339,12 @@ export function TaxCoordinatorDashboard() {
     <div className="min-h-screen lg:pl-72">
       <header className="sticky top-0 z-20 border-b border-[#D8E0EA] bg-[#EEF3F8]/90 px-4 py-3 backdrop-blur lg:hidden"><Button variant="outline" onClick={() => setDrawerOpen(true)}><Menu className="h-4 w-4" /> Menu</Button></header>
       <section className="space-y-6 p-4 sm:p-6 xl:p-8">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1><p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p></div>{isManualPage(page) && page !== "dashboard" && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1>{meta.subtitle && <p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p>}</div>{isManualPage(page) && page !== "dashboard" && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
         <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: options("tahun"), masaPajak: options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard"} />
         <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
         <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{loading ? "Memuat data pajak..." : message}{!records.length && !loading && " KPI akan menampilkan 0 sampai data tersedia."}{lastSaved && <span className="ml-2 text-slate-500">Last saved: {new Date(lastSaved).toLocaleString("id-ID")}</span>}</div>
         {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
-        <UploadHistory batches={uploadBatches} onDelete={deleteBatch} />
+        {page !== "dashboard" && <UploadHistory batches={uploadBatches} onDelete={deleteBatch} />}
         {page === "documents" ? <Documents rows={[]} onDelete={deleteManual} /> : <><KpiGrid items={buildKpis(page, summaryRows, summaryOverrides)} onEdit={async (label, value) => { const password = await verifyPassword(); if (!password) return; const input = window.prompt(`Edit nominal ${label}`, String(value)); if (input === null) return; if (input === "") { setSummaryOverrides((cur) => { const next = { ...cur }; delete next[label]; return next; }); } else { setSummaryOverrides((cur) => ({ ...cur, [label]: numberValue(input) })); } setMessage("Override summary diubah. Klik Save to Cloud untuk persist."); }} /><DataQuality rows={summaryRows} /><TransactionTable rows={summaryRows} title={page === "dashboard" ? "Resume Pembayaran Pajak" : `Tabel detail ${meta.title}`} isDashboard={page === "dashboard"} onEdit={openManual} onDelete={deleteManual} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} /></>}
       </section>
     </div>
