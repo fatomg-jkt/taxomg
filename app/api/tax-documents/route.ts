@@ -1,37 +1,13 @@
-import { get, put } from "@vercel/blob";
+import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
+import { blobOptions, hasBlobConfig, metadataPathname, readMetadata, type UploadedPdfDocument } from "./shared";
 
 const noStoreHeaders = { "Cache-Control": "no-store" };
 const prefix = "tax-documents/";
-const metadataPathname = "documents-pdf.json";
+const privateStoreMismatchMessage = "Konfigurasi akses Vercel Blob tidak sesuai. Store saat ini private.";
+const missingTokenMessage = "BLOB_READ_WRITE_TOKEN belum tersedia di Vercel Environment Variables.";
 
 export const dynamic = "force-dynamic";
-
-type UploadedPdfDocument = {
-  id: string;
-  name: string;
-  uploadedAt: string;
-  size: number;
-  type: string;
-  url: string;
-};
-
-type DocumentsPayload = { documents?: UploadedPdfDocument[] };
-
-function blobOptions() {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  const storeId = process.env.TAXOMG_STORE_ID;
-  return { token, storeId };
-}
-
-function hasBlobConfig() {
-  const { token, storeId } = blobOptions();
-  return Boolean(token || storeId);
-}
-
-function blobConfigError() {
-  return process.env.BLOB_READ_WRITE_TOKEN ? "Konfigurasi Blob belum tersedia." : "Token Blob belum tersedia.";
-}
 
 function sanitizeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9._ -]/g, "_").replace(/\s+/g, " ").trim() || "dokumen.pdf";
@@ -42,22 +18,9 @@ function isPdfFile(file: File) {
   return file.type === "application/pdf" || (!file.type && lowerName.endsWith(".pdf"));
 }
 
-function normalizeDocuments(payload: DocumentsPayload): UploadedPdfDocument[] {
-  return Array.isArray(payload.documents)
-    ? payload.documents.filter((doc) => doc && doc.id && doc.name && doc.url)
-    : [];
-}
-
-async function readMetadata(): Promise<UploadedPdfDocument[]> {
-  const options = blobOptions();
-  const result = await get(metadataPathname, { access: "private", ...options });
-  if (result?.statusCode !== 200 || !result.stream) return [];
-
-  const text = await new Response(result.stream).text();
-  if (!text.trim()) return [];
-
-  const payload = JSON.parse(text) as DocumentsPayload;
-  return normalizeDocuments(payload);
+function isPrivateStoreMismatch(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.toLowerCase().includes("cannot use public access on a private store") || message.toLowerCase().includes("private store");
 }
 
 async function writeMetadata(documents: UploadedPdfDocument[]) {
@@ -85,8 +48,8 @@ export async function GET() {
 
 export async function POST(request: Request) {
   if (!hasBlobConfig()) {
-    console.error("[tax-documents] Missing Vercel Blob configuration. Set BLOB_READ_WRITE_TOKEN or TAXOMG_STORE_ID on the server.");
-    return NextResponse.json({ ok: false, error: blobConfigError() }, { status: 500 });
+    console.error("[tax-documents] Missing BLOB_READ_WRITE_TOKEN on the server.");
+    return NextResponse.json({ ok: false, error: missingTokenMessage }, { status: 500 });
   }
 
   const formData = await request.formData().catch((error) => {
@@ -100,13 +63,13 @@ export async function POST(request: Request) {
 
   const uploadedAt = new Date().toISOString();
   const id = `pdf-${crypto.randomUUID()}`;
-  const safeName = sanitizeFileName(file.name);
-  const pathname = `${prefix}${id}-${safeName}`;
+  const originalName = sanitizeFileName(file.name);
+  const pathname = `${prefix}${id}-${originalName}`;
 
   let blobUrl = "";
   try {
     const blob = await put(pathname, file, {
-      access: "public",
+      access: "private",
       contentType: "application/pdf",
       addRandomSuffix: false,
       allowOverwrite: false,
@@ -115,12 +78,14 @@ export async function POST(request: Request) {
     blobUrl = blob.url;
   } catch (error) {
     console.error("[tax-documents] Failed to upload PDF to Vercel Blob", { pathname, size: file.size, type: file.type, error });
-    return NextResponse.json({ ok: false, error: "Gagal upload ke Vercel Blob." }, { status: 500 });
+    return NextResponse.json({ ok: false, error: isPrivateStoreMismatch(error) ? privateStoreMismatchMessage : "Gagal upload ke Vercel Blob." }, { status: 500 });
   }
 
   const document: UploadedPdfDocument = {
     id,
-    name: safeName,
+    originalName,
+    name: originalName,
+    pathname,
     uploadedAt,
     size: file.size,
     type: file.type || "application/pdf",
@@ -132,7 +97,7 @@ export async function POST(request: Request) {
     await writeMetadata([document, ...documents]);
   } catch (error) {
     console.error("[tax-documents] Failed to save PDF metadata to Vercel Blob", { document, error });
-    return NextResponse.json({ ok: false, error: "Gagal menyimpan metadata dokumen." }, { status: 500 });
+    return NextResponse.json({ ok: false, error: isPrivateStoreMismatch(error) ? privateStoreMismatchMessage : "Gagal menyimpan metadata dokumen." }, { status: 500 });
   }
 
   return NextResponse.json({ ok: true, document }, { status: 201 });
