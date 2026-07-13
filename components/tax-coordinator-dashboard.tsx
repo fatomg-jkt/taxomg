@@ -62,12 +62,12 @@ type DashboardTaxKind = "PPN" | "PPh Pasal 21" | "PPh Unifikasi" | "PB1" | "UMKM
 
 const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[] }> = {
   dashboard: { title: "Dashboard Tax All Group", subtitle: "" },
-  ppn: { title: "PPN", subtitle: "Monitoring PPN keluaran, masukan, PM tidak dikreditkan, dan pembayaran PPN.", types: ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN", "PPN"] },
-  pph21: { title: "PPh Pasal 21", subtitle: "Detail DPP, pajak terhutang, dan kelengkapan NTPN PPh Pasal 21.", types: ["PPh Pasal 21"] },
-  unifikasi: { title: "PPh Unifikasi", subtitle: "Gabungan PPh Pasal 23 dan PPh Final 4(2).", types: ["PPh Pasal 23", "PPh Final 4(2)"] },
-  pb1: { title: "PB1", subtitle: "Detail PB1 dan status NTPD pembayaran pajak daerah.", types: ["PB1"] },
-  umkm: { title: "PPh UMKM", subtitle: "Detail DPP, PPh UMKM, transaksi, dan kelengkapan NTPN.", types: ["PPh UMKM"] },
-  documents: { title: "Dokumen Pajak", subtitle: "Daftar dokumen terkait NTPN/NTPD, bukti bayar, PDF, dan file pendukung." },
+  ppn: { title: "PPN", subtitle: "Monitoring Pajak Pertambahan Nilai", types: ["PPN Keluaran", "PPN Masukan", "PM Tidak Dikreditkan", "Pembayaran PPN", "PPN"] },
+  pph21: { title: "PPh Pasal 21", subtitle: "Monitoring Pajak Atas Penghasilan Karyawan & Imbalan Atas Jasa", types: ["PPh Pasal 21"] },
+  unifikasi: { title: "PPh Unifikasi", subtitle: "Monitoring Pajak Atas Jasa, Sewa dan Persewaan Atas Tanah Dan Bangunan", types: ["PPh Pasal 23", "PPh Final 4(2)"] },
+  pb1: { title: "PB1", subtitle: "Monitoring Pajak Daerah", types: ["PB1"] },
+  umkm: { title: "PPh UMKM", subtitle: "Monitoring Pajak Atas Usaha Mikro, Kecil dan Menengah", types: ["PPh UMKM"] },
+  documents: { title: "Dokumen Pajak", subtitle: "Daftar SPT, Billing, dan SSP" },
 };
 
 const navItems = [
