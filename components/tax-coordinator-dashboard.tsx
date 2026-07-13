@@ -404,35 +404,74 @@ function buildKpis(page: Page, rows: TaxTransaction[], _overrides: SummaryOverri
 
 const DASHBOARD_COLORS: Record<DashboardTaxKind, string> = { PPN: "#2563eb", "PPh Pasal 21": "#16a34a", "PPh Unifikasi": "#f97316", PB1: "#dc2626", UMKM: "#7c3aed" };
 const DASHBOARD_KINDS: DashboardTaxKind[] = ["PPN", "PPh Pasal 21", "PPh Unifikasi", "PB1", "UMKM"];
+type TaxTypeSummary = { name: DashboardTaxKind; value: number; paid: number; balance: number; totalRows: number; verifiedRows: number; reviewRows: number; status: "Terverifikasi" | "Perlu Review" | "Belum Lengkap" };
+type TaxTrendPoint = { masa: string; total: number };
+type DashboardSummary = { totalTax: number; totalPaid: number; balance: number; uniquePeriods: number; documentCount: number; verifiedCount: number; totalRows: number; reviewCount: number };
 
-function DashboardOverview({ rows, documentCount }: { rows: TaxTransaction[]; documentCount: number }) {
+function taxAmount(row?: TaxTransaction) { return numberValue(row?.pajakTerhutang); }
+function rowHasRequiredData(row: TaxTransaction) { return Boolean(clean(row.perusahaan) && clean(row.masaPajak) && clean(row.jenisPajak)); }
+function isVerifiedOrPaid(row: TaxTransaction) {
+  const statusText = `${row.status ?? ""} ${row.statusAuto ?? ""}`.toLowerCase();
+  return Boolean(clean(row.ntpnNtpd)) || /terverifikasi|sudah\s+ada\s+ntpn|sudah\s+ada\s+ntpd|dibayar|terbayar|verified|paid/.test(statusText);
+}
+function getTaxTypeSummary(rows: TaxTransaction[] = []): TaxTypeSummary[] {
   const safeRows = Array.isArray(rows) ? rows : [];
-  const taxByKind = DASHBOARD_KINDS.map((name) => ({ name, value: safeRows.filter((row) => dashboardKind(row.jenisPajak) === name).reduce((acc, row) => acc + Math.abs(row.pajakTerhutang || 0), 0), paid: safeRows.filter((row) => dashboardKind(row.jenisPajak) === name && isPaid(row)).reduce((acc, row) => acc + Math.abs(row.pajakTerhutang || 0), 0) }));
-  const totalTax = taxByKind.reduce((acc, item) => acc + item.value, 0);
-  const totalPaid = taxByKind.reduce((acc, item) => acc + item.paid, 0);
-  const balance = totalTax - totalPaid;
-  const verifiedCount = safeRows.filter(isPaid).length;
-  const reviewCount = Math.max(safeRows.length - verifiedCount, 0);
-  const donutData = taxByKind.filter((item) => item.value > 0);
-  const chartData = taxByKind.map((item) => ({ ...item, balance: item.value - item.paid }));
-  const trendData = Array.from(safeRows.reduce<Map<string, number>>((acc, row) => {
-    const key = row.masaPajak || "-";
-    acc.set(key, (acc.get(key) || 0) + Math.abs(row.pajakTerhutang || 0));
+  return DASHBOARD_KINDS.map((name) => {
+    const typeRows = safeRows.filter((row) => dashboardKind(row.jenisPajak) === name);
+    const value = typeRows.reduce((acc, row) => acc + taxAmount(row), 0);
+    const paid = typeRows.filter(isVerifiedOrPaid).reduce((acc, row) => acc + taxAmount(row), 0);
+    const verifiedRows = typeRows.filter(isVerifiedOrPaid).length;
+    const reviewRows = Math.max(typeRows.length - verifiedRows, 0);
+    const hasIncompleteData = typeRows.some((row) => !rowHasRequiredData(row));
+    const status = !typeRows.length || hasIncompleteData ? "Belum Lengkap" : reviewRows > 0 ? "Perlu Review" : "Terverifikasi";
+    return { name, value, paid, balance: value - paid, totalRows: typeRows.length, verifiedRows, reviewRows, status };
+  });
+}
+function getDashboardSummary(rows: TaxTransaction[] = [], documentCount = 0): DashboardSummary {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const typeSummary = getTaxTypeSummary(safeRows);
+  const verifiedCount = safeRows.filter(isVerifiedOrPaid).length;
+  return {
+    totalTax: typeSummary.reduce((acc, item) => acc + item.value, 0),
+    totalPaid: typeSummary.reduce((acc, item) => acc + item.paid, 0),
+    balance: typeSummary.reduce((acc, item) => acc + item.balance, 0),
+    uniquePeriods: new Set(safeRows.map((row) => clean(row.masaPajak)).filter(Boolean)).size,
+    documentCount: numberValue(documentCount),
+    verifiedCount,
+    totalRows: safeRows.length,
+    reviewCount: Math.max(safeRows.length - verifiedCount, 0),
+  };
+}
+function getTaxCompositionData(rows: TaxTransaction[] = []) { return getTaxTypeSummary(rows).filter((item) => item.value > 0).map(({ name, value }) => ({ name, value })); }
+function getTaxTrendData(rows: TaxTransaction[] = []): TaxTrendPoint[] {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  return Array.from(safeRows.reduce<Map<string, number>>((acc, row) => {
+    const key = clean(row.masaPajak) || "-";
+    acc.set(key, (acc.get(key) || 0) + taxAmount(row));
     return acc;
   }, new Map())).sort(([a], [b]) => periodSort(a) - periodSort(b)).map(([masa, total]) => ({ masa, total }));
+}
+
+function DashboardOverview({ rows, documentCount }: { rows?: TaxTransaction[]; documentCount?: number }) {
+  const safeRows = Array.isArray(rows) ? rows : [];
+  const summary = getDashboardSummary(safeRows, documentCount);
+  const taxByKind = getTaxTypeSummary(safeRows);
+  const donutData = getTaxCompositionData(safeRows);
+  const chartData = taxByKind;
+  const trendData = getTaxTrendData(safeRows);
   const kpis = [
-    { label: "Total Pajak Terutang", value: rupiah(totalTax), icon: WalletCards, tone: "bg-blue-50 text-blue-700" },
-    { label: "Total Pajak Dibayar", value: rupiah(totalPaid), icon: ShieldCheck, tone: "bg-emerald-50 text-emerald-700" },
-    { label: "Kurang Bayar / Lebih Bayar", value: rupiah(balance), icon: balance >= 0 ? TrendingUp : TrendingDown, tone: balance >= 0 ? "bg-orange-50 text-orange-700" : "bg-red-50 text-red-700" },
-    { label: "Jumlah Masa Pajak", value: plainNumber(new Set(safeRows.map((row) => row.masaPajak).filter(Boolean)).size), icon: FileSpreadsheet, tone: "bg-indigo-50 text-indigo-700" },
-    { label: "Dokumen Pajak", value: plainNumber(documentCount || 0), icon: FileArchive, tone: "bg-purple-50 text-purple-700" },
-    { label: "Status Verifikasi", value: `${plainNumber(verifiedCount)} / ${plainNumber(safeRows.length)}`, icon: CheckCircle2, tone: "bg-slate-100 text-slate-700", helper: reviewCount ? `${plainNumber(reviewCount)} perlu review` : "Semua data terverifikasi" },
+    { label: "Total Pajak Terutang", value: rupiah(summary.totalTax), icon: WalletCards, tone: "bg-blue-50 text-blue-700" },
+    { label: "Total Pajak Dibayar", value: rupiah(summary.totalPaid), icon: ShieldCheck, tone: "bg-emerald-50 text-emerald-700" },
+    { label: "Kurang Bayar / Lebih Bayar", value: rupiah(summary.balance), icon: summary.balance >= 0 ? TrendingUp : TrendingDown, tone: summary.balance >= 0 ? "bg-orange-50 text-orange-700" : "bg-red-50 text-red-700" },
+    { label: "Jumlah Masa Pajak", value: plainNumber(summary.uniquePeriods), icon: FileSpreadsheet, tone: "bg-indigo-50 text-indigo-700" },
+    { label: "Dokumen Pajak", value: plainNumber(summary.documentCount), icon: FileArchive, tone: "bg-purple-50 text-purple-700" },
+    { label: "Status Verifikasi", value: `${plainNumber(summary.verifiedCount)} / ${plainNumber(summary.totalRows)}`, icon: CheckCircle2, tone: "bg-slate-100 text-slate-700", helper: summary.reviewCount ? `${plainNumber(summary.reviewCount)} perlu review` : "Semua data terverifikasi" },
   ];
   return <div className="space-y-6">
     <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">{kpis.map(({ label, value, icon: Icon, tone, helper }) => <Card key={label} className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><CardContent className="p-5"><div className="flex items-center justify-between gap-3"><div className={`grid h-11 w-11 place-items-center rounded-2xl ${tone}`}><Icon className="h-5 w-5" /></div><span className="rounded-full bg-slate-50 px-2.5 py-1 text-[11px] font-bold uppercase text-slate-400">YTD</span></div><p className="mt-4 text-xs font-extrabold uppercase tracking-wide text-slate-500">{label}</p><p className="mt-2 text-xl font-black text-slate-950">{value}</p>{helper && <p className="mt-1 text-xs font-semibold text-slate-500">{helper}</p>}</CardContent></Card>)}</section>
-    <section className="grid gap-6 xl:grid-cols-5"><Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm xl:col-span-2"><CardHeader><CardTitle>Komposisi Pajak</CardTitle><CardDescription>Distribusi nilai pajak berdasarkan jenis utama.</CardDescription></CardHeader><CardContent className="relative h-80"><ResponsiveContainer width="100%" height="100%"><PieChart>{donutData.length ? <Pie data={donutData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="78%" paddingAngle={3}>{donutData.map((entry) => <Cell key={entry.name} fill={DASHBOARD_COLORS[entry.name]} />)}</Pie> : <Pie data={[{ name: "Belum ada data", value: 1 }]} dataKey="value" innerRadius="58%" outerRadius="78%"><Cell fill="#e2e8f0" /></Pie>}<Tooltip formatter={(value: number) => rupiah(value)} /><Legend layout="vertical" align="right" verticalAlign="middle" /></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 grid place-items-center pr-28"><div className="text-center"><p className="text-xs font-bold uppercase text-slate-400">Total</p><p className="text-lg font-black text-slate-950">{rupiah(totalTax)}</p></div></div></CardContent></Card><Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm xl:col-span-3"><CardHeader><CardTitle>Pajak per Jenis Pajak</CardTitle><CardDescription>Perbandingan pajak terutang dan sudah dibayar.</CardDescription></CardHeader><CardContent className="h-80"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 12 }} /><YAxis tickFormatter={(value: number) => `${Math.round(value / 1000000)} jt`} width={54} /><Tooltip formatter={(value: number) => rupiah(value)} /><Legend /><Bar dataKey="value" name="Total Pajak" radius={[8, 8, 0, 0]} fill="#2563eb" /><Bar dataKey="paid" name="Sudah Dibayar" radius={[8, 8, 0, 0]} fill="#16a34a" /></BarChart></ResponsiveContainer></CardContent></Card></section>
+    <section className="grid gap-6 xl:grid-cols-5"><Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm xl:col-span-2"><CardHeader><CardTitle>Komposisi Pajak</CardTitle><CardDescription>Distribusi nilai pajak berdasarkan jenis utama.</CardDescription></CardHeader><CardContent className="relative h-80"><ResponsiveContainer width="100%" height="100%"><PieChart>{donutData.length ? <Pie data={donutData} dataKey="value" nameKey="name" innerRadius="58%" outerRadius="78%" paddingAngle={3}>{donutData.map((entry) => <Cell key={entry.name} fill={DASHBOARD_COLORS[entry.name]} />)}</Pie> : <Pie data={[{ name: "Belum ada data", value: 1 }]} dataKey="value" innerRadius="58%" outerRadius="78%"><Cell fill="#e2e8f0" /></Pie>}<Tooltip formatter={(value: number) => rupiah(value)} /><Legend layout="vertical" align="right" verticalAlign="middle" /></PieChart></ResponsiveContainer><div className="pointer-events-none absolute inset-0 grid place-items-center pr-28"><div className="text-center"><p className="text-xs font-bold uppercase text-slate-400">Total</p><p className="text-lg font-black text-slate-950">{rupiah(summary.totalTax)}</p></div></div></CardContent></Card><Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm xl:col-span-3"><CardHeader><CardTitle>Pajak per Jenis Pajak</CardTitle><CardDescription>Perbandingan pajak terutang dan sudah dibayar.</CardDescription></CardHeader><CardContent className="h-80"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartData}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 12 }} /><YAxis tickFormatter={(value: number) => `${Math.round(value / 1000000)} jt`} width={54} /><Tooltip formatter={(value: number) => rupiah(value)} /><Legend /><Bar dataKey="value" name="Total Pajak" radius={[8, 8, 0, 0]} fill="#2563eb" /><Bar dataKey="paid" name="Sudah Dibayar" radius={[8, 8, 0, 0]} fill="#16a34a" /></BarChart></ResponsiveContainer></CardContent></Card></section>
     <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Tren Pajak per Masa</CardTitle><CardDescription>Nilai pajak berdasarkan masa pajak yang tersedia.</CardDescription></CardHeader><CardContent className="h-72"><ResponsiveContainer width="100%" height="100%"><AreaChart data={trendData.length ? trendData : [{ masa: "-", total: 0 }]}><defs><linearGradient id="taxTrend" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2563eb" stopOpacity={0.28}/><stop offset="95%" stopColor="#2563eb" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="masa" /><YAxis tickFormatter={(value: number) => `${Math.round(value / 1000000)} jt`} width={54} /><Tooltip formatter={(value: number) => rupiah(value)} /><Area type="monotone" dataKey="total" name="Total Pajak" stroke="#2563eb" strokeWidth={3} fill="url(#taxTrend)" /></AreaChart></ResponsiveContainer></CardContent></Card>
-    <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Ringkasan Pajak per Jenis</CardTitle><CardDescription>Status ringkas untuk kebutuhan review management.</CardDescription></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Jenis Pajak", "Total Pajak", "Sudah Dibayar", "KB/LB", "Status"].map((head) => <TableHead key={head} className="text-xs uppercase text-slate-500">{head}</TableHead>)}</TableRow></TableHeader><TableBody>{chartData.map((item) => { const status = item.value === 0 ? "Belum Lengkap" : item.balance <= 0 ? "Terverifikasi" : item.paid > 0 ? "Perlu Review" : "Belum Lengkap"; return <TableRow key={item.name} className="hover:bg-slate-50"><TableCell className="font-bold"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: DASHBOARD_COLORS[item.name] }} />{item.name}</TableCell><TableCell>{rupiah(item.value)}</TableCell><TableCell>{rupiah(item.paid)}</TableCell><TableCell className={item.balance > 0 ? "font-bold text-orange-600" : "font-bold text-emerald-600"}>{rupiah(item.balance)}</TableCell><TableCell><Badge variant={status === "Terverifikasi" ? "success" : status === "Perlu Review" ? "warning" : "secondary"}>{status}</Badge></TableCell></TableRow>; })}</TableBody></Table></CardContent></Card>
+    <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Ringkasan Pajak per Jenis</CardTitle><CardDescription>Status ringkas untuk kebutuhan review management.</CardDescription></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Jenis Pajak", "Total Pajak", "Sudah Dibayar", "KB/LB", "Status"].map((head) => <TableHead key={head} className="text-xs uppercase text-slate-500">{head}</TableHead>)}</TableRow></TableHeader><TableBody>{chartData.length ? chartData.map((item) => <TableRow key={item.name} className="hover:bg-slate-50"><TableCell className="font-bold"><span className="mr-2 inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: DASHBOARD_COLORS[item.name] }} />{item.name}</TableCell><TableCell>{rupiah(item.value)}</TableCell><TableCell>{rupiah(item.paid)}</TableCell><TableCell className={item.balance > 0 ? "font-bold text-orange-600" : "font-bold text-emerald-600"}>{rupiah(item.balance)}</TableCell><TableCell><Badge variant={item.status === "Terverifikasi" ? "success" : item.status === "Perlu Review" ? "warning" : "secondary"}>{item.status}</Badge></TableCell></TableRow>) : <TableRow><TableCell colSpan={5} className="h-24 text-center text-sm font-semibold text-slate-500">Belum ada data sesuai filter.</TableCell></TableRow>}</TableBody></Table></CardContent></Card>
   </div>;
 }
 
