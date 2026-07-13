@@ -320,7 +320,7 @@ export function TaxCoordinatorDashboard() {
   const filtered = useMemo(() => baseRows.filter((r) => (filters.tahun === ALL || r.tahun === filters.tahun) && (filters.masaPajak === ALL || r.masaPajak === filters.masaPajak) && (filters.perusahaan === ALL || r.perusahaan === filters.perusahaan) && (filters.jenisPajak === ALL || r.jenisPajak === filters.jenisPajak) && (filters.status === ALL || r.status === filters.status) && (!filters.search || `${r.perusahaan} ${r.ntpnNtpd} ${r.jenisPajak} ${r.keterangan}`.toLowerCase().includes(filters.search.toLowerCase()))), [baseRows, filters]);
   const options = (key: keyof TaxTransaction) => Array.from(new Set(records.map((r) => String(r[key] ?? "")))).filter(Boolean).sort((a, b) => key === "masaPajak" ? periodSort(a) - periodSort(b) : a.localeCompare(b));
   const summaryRows = useMemo(() => filtered.filter(isManualInput), [filtered]);
-  const dashboardRows = useMemo(() => page === "dashboard" ? filtered : summaryRows, [filtered, page, summaryRows]);
+  const dashboardRows = useMemo(() => summaryRows, [summaryRows]);
   const meta = pageMeta[page];
 
   function updateFilter(key: keyof Filters, value: string) { setFilters((cur) => ({ ...cur, [key]: value })); }
@@ -414,12 +414,23 @@ function isVerifiedOrPaid(row: TaxTransaction) {
   const statusText = `${row.status ?? ""} ${row.statusAuto ?? ""}`.toLowerCase();
   return Boolean(clean(row.ntpnNtpd)) || /terverifikasi|sudah\s+ada\s+ntpn|sudah\s+ada\s+ntpd|dibayar|terbayar|verified|paid/.test(statusText);
 }
+function dashboardTaxTotal(name: DashboardTaxKind, rows: TaxTransaction[]) {
+  if (name === "PPN") return ppnBalance(rows);
+  if (name === "PPh Pasal 21") return sum(rows, "PPh Pasal 21");
+  if (name === "PPh Unifikasi") return sum(rows, "PPh Pasal 23") + sum(rows, "PPh Final 4(2)");
+  if (name === "PB1") return sum(rows, "PB1");
+  return sum(rows, "PPh UMKM");
+}
+function dashboardPaidTotal(name: DashboardTaxKind, rows: TaxTransaction[]) {
+  if (name === "PPN") return ppnPayment(rows);
+  return rows.filter(isVerifiedOrPaid).reduce((acc, row) => acc + taxAmount(row), 0);
+}
 function getTaxTypeSummary(rows: TaxTransaction[] = []): TaxTypeSummary[] {
   const safeRows = Array.isArray(rows) ? rows : [];
   return DASHBOARD_KINDS.map((name) => {
     const typeRows = safeRows.filter((row) => dashboardKind(row.jenisPajak) === name);
-    const value = typeRows.reduce((acc, row) => acc + taxAmount(row), 0);
-    const paid = typeRows.filter(isVerifiedOrPaid).reduce((acc, row) => acc + taxAmount(row), 0);
+    const value = dashboardTaxTotal(name, typeRows);
+    const paid = dashboardPaidTotal(name, typeRows);
     const verifiedRows = typeRows.filter(isVerifiedOrPaid).length;
     const reviewRows = Math.max(typeRows.length - verifiedRows, 0);
     const hasIncompleteData = typeRows.some((row) => !rowHasRequiredData(row));
@@ -445,11 +456,11 @@ function getDashboardSummary(rows: TaxTransaction[] = [], documentCount = 0): Da
 function getTaxCompositionData(rows: TaxTransaction[] = []) { return getTaxTypeSummary(rows).filter((item) => item.value > 0).map(({ name, value }) => ({ name, value })); }
 function getTaxTrendData(rows: TaxTransaction[] = []): TaxTrendPoint[] {
   const safeRows = Array.isArray(rows) ? rows : [];
-  return Array.from(safeRows.reduce<Map<string, number>>((acc, row) => {
+  return Array.from(safeRows.reduce<Map<string, TaxTransaction[]>>((acc, row) => {
     const key = clean(row.masaPajak) || "-";
-    acc.set(key, (acc.get(key) || 0) + taxAmount(row));
+    acc.set(key, [...(acc.get(key) ?? []), row]);
     return acc;
-  }, new Map())).sort(([a], [b]) => periodSort(a) - periodSort(b)).map(([masa, total]) => ({ masa, total }));
+  }, new Map())).sort(([a], [b]) => periodSort(a) - periodSort(b)).map(([masa, periodRows]) => ({ masa, total: getDashboardSummary(periodRows).totalTax }));
 }
 
 function DashboardOverview({ rows, documentCount }: { rows?: TaxTransaction[]; documentCount?: number }) {
