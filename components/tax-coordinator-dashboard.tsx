@@ -3,7 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { parseTaxWorkbook, type TaxRecord } from "@/src/lib/parseTaxWorkbook";
-import { Building2, CheckCircle2, Download, Edit3, Eye, FileArchive, FileSpreadsheet, Home, Menu, Plus, Receipt, Search, ShieldCheck, TrendingDown, TrendingUp, Trash2, Upload, WalletCards, X } from "lucide-react";
+import { Building2, CheckCircle2, Download, Edit3, Eye, FileArchive, FileSpreadsheet, Home, Menu, Plus, Receipt, ShieldCheck, TrendingDown, TrendingUp, Trash2, Upload, WalletCards, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ const STATUSES = ["Terverifikasi", "Belum Lengkap", "Nihil", "Lebih Bayar", "Kom
 const PPH_TYPES: TaxType[] = ["PPh Pasal 21", "PPh Pasal 23", "PPh Final 4(2)", "PPh UMKM"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 const MONTH_NAMES = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"] as const;
+const PROFESSIONAL_FONT_STACK = "Inter, 'Plus Jakarta Sans', Manrope, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
 type TaxType = (typeof TAX_TYPES)[number];
 type Status = (typeof STATUSES)[number];
@@ -125,6 +126,7 @@ function normalizePeriod(value: unknown) {
 }
 function periodYear(period: string) { const match = period.match(/(\d{2,4})$/); return match ? (match[1].length === 2 ? `20${match[1]}` : match[1]) : String(new Date().getFullYear()); }
 function periodSort(period: string) { const [m] = period.split("-"); const idx = monthIndex(m); return Number(periodYear(period)) * 100 + (idx >= 0 ? idx : 0); }
+function matchesMonthFilter(period: string, selectedMonth: string) { const selectedIndex = monthIndex(selectedMonth); if (selectedIndex < 0) return period === selectedMonth; return monthIndex(period) === selectedIndex; }
 function taxTypeFromText(value: unknown, sheet = ""): TaxType | undefined {
   const text = `${value ?? ""} ${sheet}`.toLowerCase();
   if (/pm\s*tidak|tidak\s+dikredit/.test(text)) return "PM Tidak Dikreditkan";
@@ -317,8 +319,17 @@ export function TaxCoordinatorDashboard() {
   useEffect(() => { const saved = localStorage.getItem(FILTER_STORAGE_KEY); if (saved) { const parsed = JSON.parse(saved) as Partial<Filters>; setFilters({ tahun: parsed.tahun ?? DEFAULT_DASHBOARD_YEAR, masaPajak: parsed.masaPajak ?? ALL, perusahaan: parsed.perusahaan ?? ALL, jenisPajak: parsed.jenisPajak ?? ALL, status: parsed.status ?? ALL, search: parsed.search ?? "" }); } refreshData(); }, []);
   useEffect(() => localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(filters)), [filters]);
   const baseRows = useMemo(() => pageMeta[page].types ? records.filter((r) => pageMeta[page].types?.includes(r.jenisPajak)) : records, [page, records]);
-  const filtered = useMemo(() => baseRows.filter((r) => (filters.tahun === ALL || r.tahun === filters.tahun) && (filters.masaPajak === ALL || r.masaPajak === filters.masaPajak) && (filters.perusahaan === ALL || r.perusahaan === filters.perusahaan) && (filters.jenisPajak === ALL || r.jenisPajak === filters.jenisPajak) && (filters.status === ALL || r.status === filters.status) && (!filters.search || `${r.perusahaan} ${r.ntpnNtpd} ${r.jenisPajak} ${r.keterangan}`.toLowerCase().includes(filters.search.toLowerCase()))), [baseRows, filters]);
+  const filtered = useMemo(() => baseRows.filter((r) => {
+    const matchesTahun = filters.tahun === ALL || r.tahun === filters.tahun;
+    const matchesMasaPajak = filters.masaPajak === ALL || (page === "dashboard" ? matchesMonthFilter(r.masaPajak, filters.masaPajak) : r.masaPajak === filters.masaPajak);
+    const matchesPerusahaan = filters.perusahaan === ALL || r.perusahaan === filters.perusahaan;
+    const matchesJenisPajak = filters.jenisPajak === ALL || r.jenisPajak === filters.jenisPajak;
+    const matchesStatus = page === "dashboard" || filters.status === ALL || r.status === filters.status;
+    const matchesSearch = page === "dashboard" || !filters.search || `${r.perusahaan} ${r.ntpnNtpd} ${r.jenisPajak} ${r.keterangan}`.toLowerCase().includes(filters.search.toLowerCase());
+    return matchesTahun && matchesMasaPajak && matchesPerusahaan && matchesJenisPajak && matchesStatus && matchesSearch;
+  }), [baseRows, filters, page]);
   const options = (key: keyof TaxTransaction) => Array.from(new Set(records.map((r) => String(r[key] ?? "")))).filter(Boolean).sort((a, b) => key === "masaPajak" ? periodSort(a) - periodSort(b) : a.localeCompare(b));
+  const dashboardYearOptions = Array.from(new Set([DEFAULT_DASHBOARD_YEAR, ...options("tahun").filter((year) => Number(year) >= 2026)]));
   const summaryRows = useMemo(() => filtered.filter(isManualInput), [filtered]);
   const dashboardRows = useMemo(() => summaryRows, [summaryRows]);
   const meta = pageMeta[page];
@@ -364,13 +375,13 @@ export function TaxCoordinatorDashboard() {
     reader.readAsArrayBuffer(file);
   }
 
-  return <main className="min-h-screen bg-[#EEF3F8] text-slate-950">
+  return <main className="min-h-screen bg-[#EEF3F8] text-slate-950" style={page === "dashboard" ? { fontFamily: PROFESSIONAL_FONT_STACK } : undefined}>
     <Sidebar page={page} setPage={setPage} open={drawerOpen} setOpen={setDrawerOpen} />
     <div className="min-h-screen lg:pl-72">
       <header className="sticky top-0 z-20 border-b border-[#D8E0EA] bg-[#EEF3F8]/90 px-4 py-3 backdrop-blur lg:hidden"><Button variant="outline" onClick={() => setDrawerOpen(true)}><Menu className="h-4 w-4" /> Menu</Button></header>
       <section className="space-y-6 p-4 sm:p-6 xl:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1>{meta.subtitle && <p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p>}</div>{isManualPage(page) && page !== "dashboard" && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
-        <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: options("tahun"), masaPajak: options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard" && page !== "documents"} showStatusAndSearch={page !== "documents"} />
+        <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: page === "dashboard" ? dashboardYearOptions : options("tahun"), masaPajak: page === "dashboard" ? MONTH_NAMES : options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard" && page !== "documents"} showStatusAndSearch={page !== "documents" && page !== "dashboard"} />
         <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
         <Input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" onChange={uploadPdf} className="hidden" />
         <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{loading ? "Memuat data pajak..." : message}{!records.length && !loading && " KPI akan menampilkan 0 sampai data tersedia."}{lastSaved && <span className="ml-2 text-slate-500">Last saved: {new Date(lastSaved).toLocaleString("id-ID")}</span>}</div>
@@ -388,9 +399,9 @@ function Sidebar({ page, setPage, open, setOpen }: { page: Page; setPage: (page:
     <nav className="space-y-2">{navItems.map(([id, Icon, label]) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition", page === id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white")}><Icon className="h-5 w-5" />{label}</button>)}</nav>
   </aside>;
 }
-function FilterBar({ filters, updateFilter, options, onUpload, onManual, onSave, saving, showDataEntryActions = true, showStatusAndSearch = true }: { filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; options: { tahun: string[]; masaPajak: string[]; perusahaan: string[]; jenisPajak: readonly string[]; status: readonly string[] }; onUpload: () => void; onManual: () => void; onSave: () => void; saving: boolean; showDataEntryActions?: boolean; showStatusAndSearch?: boolean }) {
+function FilterBar({ filters, updateFilter, options, onUpload, onManual, onSave, saving, showDataEntryActions = true, showStatusAndSearch = true }: { filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; options: { tahun: readonly string[]; masaPajak: readonly string[]; perusahaan: readonly string[]; jenisPajak: readonly string[]; status: readonly string[] }; onUpload: () => void; onManual: () => void; onSave: () => void; saving: boolean; showDataEntryActions?: boolean; showStatusAndSearch?: boolean }) {
   const selects: [keyof Filters, string, readonly string[]][] = [["tahun", "Semua Tahun", options.tahun], ["masaPajak", "Semua Masa Pajak", options.masaPajak], ["perusahaan", "Semua Perusahaan", options.perusahaan], ["jenisPajak", "Semua Jenis Pajak", options.jenisPajak], ...(showStatusAndSearch ? ([["status", "Semua Status", options.status]] as [keyof Filters, string, readonly string[]][]) : [])];
-  return <Card className="rounded-3xl border-[#D8E0EA] shadow-sm"><CardContent className="flex flex-wrap items-center gap-3 p-4">{selects.map(([key, placeholder, values]) => <Select key={key} value={filters[key]} onChange={(e) => updateFilter(key, e.target.value)} className="h-11 min-w-0 flex-1 basis-full rounded-2xl bg-white sm:basis-[calc(50%-0.75rem)] lg:basis-44"><option value={ALL}>{placeholder}</option>{values.map((v) => <option key={v} value={v}>{v}</option>)}</Select>)}{showStatusAndSearch && <div className="relative min-w-0 flex-1 basis-full lg:basis-72"><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" /><Input value={filters.search} onChange={(e) => updateFilter("search", e.target.value)} placeholder="Cari perusahaan, NTPN, jenis pajak..." className="h-11 rounded-2xl bg-white pl-9" /></div>}<div className="flex w-full flex-wrap gap-3 sm:w-auto sm:flex-nowrap">{showDataEntryActions && <><Button onClick={onUpload} className="h-11 flex-1 rounded-2xl bg-blue-600 font-bold hover:bg-blue-700 sm:flex-none"><Upload className="h-4 w-4" /> Upload Excel</Button><Button onClick={onManual} variant="outline" className="h-11 flex-1 rounded-2xl font-bold sm:flex-none"><Plus className="h-4 w-4" /> Manual</Button></>}<Button onClick={onSave} disabled={saving} variant="outline" className="h-11 flex-1 rounded-2xl font-bold sm:flex-none">Save to Cloud</Button></div></CardContent></Card>;
+  return <Card className="rounded-3xl border-[#D8E0EA] shadow-sm"><CardContent className="flex flex-wrap items-center gap-3 p-4">{selects.map(([key, placeholder, values]) => <Select key={key} value={filters[key]} onChange={(e) => updateFilter(key, e.target.value)} className="h-11 min-w-0 flex-1 basis-full rounded-2xl bg-white sm:basis-[calc(50%-0.75rem)] lg:basis-44"><option value={ALL}>{placeholder}</option>{values.map((v) => <option key={v} value={v}>{v}</option>)}</Select>)}<div className="flex w-full flex-wrap gap-3 sm:w-auto sm:flex-nowrap">{showDataEntryActions && <><Button onClick={onUpload} className="h-11 flex-1 rounded-2xl bg-blue-600 font-bold hover:bg-blue-700 sm:flex-none"><Upload className="h-4 w-4" /> Upload Excel</Button><Button onClick={onManual} variant="outline" className="h-11 flex-1 rounded-2xl font-bold sm:flex-none"><Plus className="h-4 w-4" /> Manual</Button></>}<Button onClick={onSave} disabled={saving} variant="outline" className="h-11 flex-1 rounded-2xl font-bold sm:flex-none">Save to Cloud</Button></div></CardContent></Card>;
 }
 function buildKpis(page: Page, rows: TaxTransaction[], _overrides: SummaryOverrides = {}): KpiItem[] {
   void _overrides;
