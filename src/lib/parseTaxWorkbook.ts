@@ -2,7 +2,7 @@ import * as XLSX from "xlsx";
 
 export type TaxRecord = {
   id: string;
-  sourceSheet: "PPH-Resto" | "PPN-1001" | "PPH-1001" | "PPH-OBS" | "Manual";
+  sourceSheet: string;
   company: string;
   masa: string;
   jenisPajak: string;
@@ -12,7 +12,88 @@ export type TaxRecord = {
   status: string;
   source: "Excel Upload" | "Manual";
   keterangan?: string;
+  year?: string;
+  ppnKeluaran?: number;
+  ppnMasukan?: number;
+  pmTidakDikreditkan?: number;
+  totalPembayaranPpn?: number;
 };
+
+export type UploadTaxPage = "ppn" | "pph21" | "unifikasi" | "pb1" | "umkm";
+
+const UPLOAD_MONTHS = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+const MONTH_ALIASES: Record<string, number> = {
+  jan: 0, januari: 0, feb: 1, februari: 1, mar: 2, maret: 2, apr: 3, april: 3,
+  mei: 4, may: 4, jun: 5, juni: 5, jul: 6, juli: 6, agu: 7, aug: 7, agustus: 7,
+  sep: 8, september: 8, okt: 9, oct: 9, oktober: 9, nov: 10, november: 10,
+  des: 11, dec: 11, desember: 11,
+};
+
+function uploadPeriod(value: unknown) {
+  if (value instanceof Date) return UPLOAD_MONTHS[value.getMonth()];
+  if (typeof value === "number" && value > 20000) {
+    const date = XLSX.SSF.parse_date_code(value);
+    return date ? UPLOAD_MONTHS[date.m - 1] : "-";
+  }
+  const text = clean(value);
+  if (!text) return "-";
+  const alias = text.toLowerCase().match(/^[a-z]+/)?.[0];
+  const index = alias === undefined ? undefined : MONTH_ALIASES[alias];
+  return index === undefined ? text : UPLOAD_MONTHS[index];
+}
+
+function normalizedHeader(value: unknown) {
+  return clean(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** Parse the simple, page-specific upload format. Only the first worksheet is read. */
+export function parsePageTaxWorkbook(arrayBuffer: ArrayBuffer, page: UploadTaxPage): TaxRecord[] {
+  const workbook = XLSX.read(arrayBuffer, { type: "array", cellDates: true });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) throw new Error("Format Excel tidak sesuai. Pastikan baris pertama berisi header kolom.");
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[firstSheetName], { header: 1, defval: "", blankrows: false });
+  const headers = (rows[0] ?? []).map(normalizedHeader);
+  const column = (name: string) => headers.indexOf(normalizedHeader(name));
+  const requiredRecognition = ["Perusahaan", "Masa Pajak", "Tahun", "DPP", "NTPN/NTPD", "Status"];
+  if (!requiredRecognition.some((name) => column(name) >= 0)) {
+    throw new Error("Format Excel tidak sesuai. Pastikan baris pertama berisi header kolom.");
+  }
+  const value = (row: unknown[], name: string) => { const index = column(name); return index >= 0 ? row[index] : ""; };
+  const typeFor = (raw: unknown): TaxRecord["jenisPajak"] => {
+    if (page === "ppn") return "PPN";
+    if (page === "pph21") return "PPh Pasal 21";
+    if (page === "pb1") return "PB1";
+    if (page === "umkm") return "PPh UMKM";
+    const text = clean(raw).toLowerCase();
+    if (/4\s*\(?2\)?|final/.test(text)) return "PPh Final 4(2)";
+    return "PPh Pasal 23";
+  };
+  return rows.slice(1).filter((row) => row.some((cell) => clean(cell))).map((row, index) => {
+    const company = clean(value(row, "Perusahaan"));
+    const period = uploadPeriod(value(row, "Masa Pajak"));
+    const year = clean(value(row, "Tahun")) || "2026";
+    const ntpnNtpd = clean(value(row, "NTPN/NTPD"));
+    const dpp = num(value(row, "DPP"));
+    const ppnKeluaran = num(value(row, "PPN Keluaran"));
+    const ppnMasukan = num(value(row, "PPN Masukan"));
+    const suppliedTax = clean(value(row, "Pajak Terutang"));
+    const umkmTax = num(value(row, "PPh UMKM"));
+    const computedTax = page === "ppn" ? ppnKeluaran - ppnMasukan : page === "umkm" && !suppliedTax ? umkmTax : 0;
+    const pajakTerutang = suppliedTax ? num(suppliedTax) : computedTax;
+    const suppliedPayment = clean(value(row, page === "ppn" ? "Pembayaran PPN" : "Pembayaran Pajak"));
+    const payment = suppliedPayment ? num(suppliedPayment) : page === "ppn" && ntpnNtpd ? pajakTerutang : 0;
+    return {
+      id: `upload-${page}-${index + 2}-${uuid()}`, sourceSheet: firstSheetName, company, masa: period,
+      year, jenisPajak: typeFor(value(row, "Jenis Pajak")), dpp,
+      pajakTerutang, ntpnNtpd,
+      status: clean(value(row, "Status")) || (ntpnNtpd ? "Terverifikasi" : "Belum Lengkap"),
+      source: "Excel Upload", ppnKeluaran: page === "ppn" ? ppnKeluaran : undefined,
+      ppnMasukan: page === "ppn" ? ppnMasukan : undefined,
+      pmTidakDikreditkan: page === "ppn" ? num(value(row, "PM Tidak Dikreditkan")) : undefined,
+      totalPembayaranPpn: page === "ppn" ? payment : undefined,
+    };
+  });
+}
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
 const clean = (value: unknown) => String(value ?? "").trim();
