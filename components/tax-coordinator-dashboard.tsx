@@ -94,7 +94,7 @@ function numberValue(value: unknown) {
 function monthIndex(value: unknown) {
   const text = clean(value).toLowerCase();
   if (!text) return -1;
-  return MONTH_NAMES.findIndex((month, index) => text === month.toLowerCase() || text.startsWith(month.toLowerCase().slice(0, 3)) || text.startsWith(MONTHS[index].toLowerCase()));
+  return MONTH_NAMES.findIndex((month, index) => text === month.toLowerCase() || text.startsWith(month.toLowerCase().slice(0, 3)) || text.startsWith(MONTHS[index].toLowerCase()) || (month === "Mei" && text.startsWith("may")) || (month === "Agustus" && text.startsWith("aug")) || (month === "Oktober" && text.startsWith("oct")) || (month === "Desember" && text.startsWith("dec")));
 }
 function normalizePaymentDate(value: unknown) {
   const text = clean(value);
@@ -114,18 +114,22 @@ function normalizePaymentDate(value: unknown) {
 function normalizePeriod(value: unknown) {
   if (typeof value === "number" && value > 20000) {
     const d = XLSX.SSF.parse_date_code(value);
-    return `${MONTHS[d.m - 1]}-${String(d.y).slice(-2)}`;
+    return d ? `${MONTHS[d.m - 1]}-${String(Math.max(d.y, 2026)).slice(-2)}` : "-";
   }
   const text = clean(value);
   if (!text) return "-";
+  const match = text.match(/(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*[\s/-]*(\d{2,4})?/i);
+  if (match) {
+    const idx = ["jan", "feb", "mar", "apr", "mei", "jun", "jul", "agu", "sep", "okt", "nov", "des"].findIndex((m) => match[1].toLowerCase().startsWith(m) || (m === "mei" && match[1].toLowerCase().startsWith("may")) || (m === "agu" && match[1].toLowerCase().startsWith("aug")) || (m === "okt" && match[1].toLowerCase().startsWith("oct")) || (m === "des" && match[1].toLowerCase().startsWith("dec")));
+    const rawYear = match[2];
+    return rawYear ? `${MONTHS[Math.max(idx, 0)]}-${String(normalizeYear(rawYear)).slice(-2)}` : MONTH_NAMES[Math.max(idx, 0)];
+  }
   const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) return `${MONTHS[parsed.getMonth()]}-${String(parsed.getFullYear()).slice(-2)}`;
-  const match = text.match(/(jan|feb|mar|apr|mei|may|jun|jul|agu|aug|sep|okt|oct|nov|des|dec)[a-z]*[\s/-]*(\d{2,4})/i);
-  if (!match) return text;
-  const idx = ["jan", "feb", "mar", "apr", "mei", "jun", "jul", "agu", "sep", "okt", "nov", "des"].findIndex((m) => match[1].toLowerCase().startsWith(m) || (m === "mei" && match[1].toLowerCase().startsWith("may")) || (m === "agu" && match[1].toLowerCase().startsWith("aug")) || (m === "okt" && match[1].toLowerCase().startsWith("oct")) || (m === "des" && match[1].toLowerCase().startsWith("dec")));
-  return `${MONTHS[Math.max(idx, 0)]}-${match[2].length === 2 ? match[2] : match[2].slice(-2)}`;
+  if (!Number.isNaN(parsed.getTime())) return `${MONTHS[parsed.getMonth()]}-${String(Math.max(parsed.getFullYear(), 2026)).slice(-2)}`;
+  return text;
 }
-function periodYear(period: string) { const match = period.match(/(\d{2,4})$/); return match ? (match[1].length === 2 ? `20${match[1]}` : match[1]) : String(new Date().getFullYear()); }
+function normalizeYear(value: unknown) { const year = Number(clean(value)); return Number.isFinite(year) && year >= 2026 ? String(Math.trunc(year)) : DEFAULT_DASHBOARD_YEAR; }
+function periodYear(period: string) { const match = period.match(/(\d{2,4})$/); return match ? normalizeYear(match[1].length === 2 ? `20${match[1]}` : match[1]) : DEFAULT_DASHBOARD_YEAR; }
 function periodSort(period: string) { const [m] = period.split("-"); const idx = monthIndex(m); return Number(periodYear(period)) * 100 + (idx >= 0 ? idx : 0); }
 function matchesMonthFilter(period: string, selectedMonth: string) { const selectedIndex = monthIndex(selectedMonth); if (selectedIndex < 0) return period === selectedMonth; return monthIndex(period) === selectedIndex; }
 function taxTypeFromText(value: unknown, sheet = ""): TaxType | undefined {
@@ -220,7 +224,7 @@ function normalizeManualRecord(form: ManualForm): TaxTransaction {
   const pajakTerhutang = isPpn ? (clean(form.totalPembayaranPpn) ? numberValue(form.totalPembayaranPpn) : computedPpn) : numberValue(form.pajak);
   const statusAuto = automaticStatus(pajakTerhutang, form.ntpnNtpd, form.keterangan, dppNumber);
   const now = new Date().toISOString();
-  return { id: form.id || `manual-${crypto.randomUUID()}`, perusahaan: clean(form.perusahaan), tahun: clean(form.tahun), masaPajak: clean(form.masaPajak), jenisPajak: form.jenisPajak, dpp: dppNumber, pajakTerhutang, ntpnNtpd: clean(form.ntpnNtpd), tanggalBayar: normalizePaymentDate(form.tanggalBayar), ppnKeluaran: isPpn ? numberValue(form.ppnKeluaran) : undefined, ppnMasukan: isPpn ? numberValue(form.ppnMasukan) : undefined, pmTidakDikreditkan: isPpn ? numberValue(form.pmTidakDikreditkan) : undefined, status: clean(form.status) || displayStatus(statusAuto), statusAuto, keterangan: clean(form.keterangan) || (isPpn ? `PPN Keluaran ${rupiah(numberValue(form.ppnKeluaran))}; PPN Masukan ${rupiah(numberValue(form.ppnMasukan))}; PM Tidak Dikreditkan ${rupiah(numberValue(form.pmTidakDikreditkan))}` : ""), sourceData: "Manual Input", sourceSheet: "Manual Input", sourceRow: 0, createdAt: now, updatedAt: now };
+  return { id: form.id || `manual-${crypto.randomUUID()}`, perusahaan: clean(form.perusahaan), tahun: normalizeYear(form.tahun), masaPajak: clean(form.masaPajak), jenisPajak: form.jenisPajak, dpp: dppNumber, pajakTerhutang, ntpnNtpd: clean(form.ntpnNtpd), tanggalBayar: normalizePaymentDate(form.tanggalBayar), ppnKeluaran: isPpn ? numberValue(form.ppnKeluaran) : undefined, ppnMasukan: isPpn ? numberValue(form.ppnMasukan) : undefined, pmTidakDikreditkan: isPpn ? numberValue(form.pmTidakDikreditkan) : undefined, status: clean(form.status) || displayStatus(statusAuto), statusAuto, keterangan: clean(form.keterangan) || (isPpn ? `PPN Keluaran ${rupiah(numberValue(form.ppnKeluaran))}; PPN Masukan ${rupiah(numberValue(form.ppnMasukan))}; PM Tidak Dikreditkan ${rupiah(numberValue(form.pmTidakDikreditkan))}` : ""), sourceData: "Manual Input", sourceSheet: "Manual Input", sourceRow: 0, createdAt: now, updatedAt: now };
 }
 function validateManualForm(form: ManualForm) {
   const errors: Record<string, string> = {};
@@ -239,7 +243,7 @@ function normalizeStaticEntry(row: StaticTaxEntry, index: number): TaxTransactio
   const pajakValue = numberValue(pajak);
   const ntpnNtpd = clean(row.ntpnNtpd ?? row.ntpn_ntpd);
   const statusAuto = clean(row.statusAuto ?? row.status_auto) || automaticStatus(pajakValue, ntpnNtpd, clean(row.keterangan), dppValue);
-  return { id: clean(row.id) || `static-${index + 1}`, perusahaan: clean(row.perusahaan) || "Perusahaan Belum Diisi", tahun: clean(row.tahun) || periodYear(clean(row.masaPajak ?? row.masa_pajak)), masaPajak: clean(row.masaPajak ?? row.masa_pajak) || "-", jenisPajak: (row.jenisPajak ?? row.jenis_pajak ?? "PPh Pasal 21") as TaxType, dpp: dppValue, pajakTerhutang: pajakValue, ntpnNtpd, tanggalBayar: normalizePaymentDate(row.tanggalBayar ?? row.tanggal_bayar), ppnKeluaran: numberValue(row.ppnKeluaran ?? row.ppn_keluaran), ppnMasukan: numberValue(row.ppnMasukan ?? row.ppn_masukan), pmTidakDikreditkan: numberValue(row.pmTidakDikreditkan ?? row.pm_tidak_dikreditkan), totalPembayaranPpn: row.totalPembayaranPpn === undefined ? undefined : numberValue(row.totalPembayaranPpn), status: clean(row.status) || displayStatus(statusAuto), statusAuto, keterangan: clean(row.keterangan), sourceData: row.sourceData ?? row.source_data ?? "Static File", sourceSheet: clean(row.sourceSheet ?? row.source_sheet) || "tax-data.json", sourceRow: Number(row.sourceRow ?? row.source_row) || index + 1, uploadBatchId: row.uploadBatchId ?? row.upload_batch_id, createdAt: clean(row.createdAt ?? row.created_at), updatedAt: clean(row.updatedAt ?? row.updated_at) };
+  return { id: clean(row.id) || `static-${index + 1}`, perusahaan: clean(row.perusahaan) || "Perusahaan Belum Diisi", tahun: normalizeYear(row.tahun || periodYear(clean(row.masaPajak ?? row.masa_pajak))), masaPajak: clean(row.masaPajak ?? row.masa_pajak) || "-", jenisPajak: (row.jenisPajak ?? row.jenis_pajak ?? "PPh Pasal 21") as TaxType, dpp: dppValue, pajakTerhutang: pajakValue, ntpnNtpd, tanggalBayar: normalizePaymentDate(row.tanggalBayar ?? row.tanggal_bayar), ppnKeluaran: numberValue(row.ppnKeluaran ?? row.ppn_keluaran), ppnMasukan: numberValue(row.ppnMasukan ?? row.ppn_masukan), pmTidakDikreditkan: numberValue(row.pmTidakDikreditkan ?? row.pm_tidak_dikreditkan), totalPembayaranPpn: row.totalPembayaranPpn === undefined ? undefined : numberValue(row.totalPembayaranPpn), status: clean(row.status) || displayStatus(statusAuto), statusAuto, keterangan: clean(row.keterangan), sourceData: row.sourceData ?? row.source_data ?? "Static File", sourceSheet: clean(row.sourceSheet ?? row.source_sheet) || "tax-data.json", sourceRow: Number(row.sourceRow ?? row.source_row) || index + 1, uploadBatchId: row.uploadBatchId ?? row.upload_batch_id, createdAt: clean(row.createdAt ?? row.created_at), updatedAt: clean(row.updatedAt ?? row.updated_at) };
 }
 function toStaticEntry(row: TaxTransaction) {
   return { id: row.id, perusahaan: row.perusahaan, tahun: row.tahun, masaPajak: row.masaPajak, jenisPajak: row.jenisPajak, dpp: row.dpp, pajak: row.pajakTerhutang, ntpnNtpd: row.ntpnNtpd, tanggalBayar: normalizePaymentDate(row.tanggalBayar), ppnKeluaran: row.ppnKeluaran || 0, ppnMasukan: row.ppnMasukan || 0, pmTidakDikreditkan: row.pmTidakDikreditkan || 0, totalPembayaranPpn: row.totalPembayaranPpn || 0, status: row.status, statusAuto: row.statusAuto || "", keterangan: row.keterangan, sourceData: row.sourceData || "Static File", sourceSheet: row.sourceSheet, createdAt: row.createdAt || new Date().toISOString(), updatedAt: row.updatedAt || new Date().toISOString() };
@@ -314,14 +318,14 @@ export function TaxCoordinatorDashboard() {
   }
   function mapTaxRecord(row: TaxRecord): TaxTransaction {
     const statusAuto = automaticStatus(row.pajakTerutang, row.ntpnNtpd, row.keterangan || "", row.dpp);
-    return { id: row.id, perusahaan: row.company, masaPajak: row.masa, tahun: row.year || periodYear(row.masa), jenisPajak: row.jenisPajak as TaxType, dpp: row.dpp, pajakTerhutang: row.pajakTerutang, ntpnNtpd: row.ntpnNtpd, status: row.status || displayStatus(statusAuto), statusAuto, keterangan: row.keterangan || "", ppnKeluaran: row.ppnKeluaran, ppnMasukan: row.ppnMasukan, pmTidakDikreditkan: row.pmTidakDikreditkan, totalPembayaranPpn: row.totalPembayaranPpn, sourceData: "Excel Import", sourceSheet: row.sourceSheet, sourceRow: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    return { id: row.id, perusahaan: row.company, masaPajak: row.masa, tahun: normalizeYear(row.year || periodYear(row.masa)), jenisPajak: row.jenisPajak as TaxType, dpp: row.dpp, pajakTerhutang: row.pajakTerutang, ntpnNtpd: row.ntpnNtpd, status: row.status || displayStatus(statusAuto), statusAuto, keterangan: row.keterangan || "", ppnKeluaran: row.ppnKeluaran, ppnMasukan: row.ppnMasukan, pmTidakDikreditkan: row.pmTidakDikreditkan, totalPembayaranPpn: row.totalPembayaranPpn, sourceData: "Excel Import", sourceSheet: row.sourceSheet, sourceRow: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   }
-  useEffect(() => { const saved = localStorage.getItem(FILTER_STORAGE_KEY); if (saved) { const parsed = JSON.parse(saved) as Partial<Filters>; setFilters({ tahun: parsed.tahun ?? DEFAULT_DASHBOARD_YEAR, masaPajak: parsed.masaPajak ?? ALL, perusahaan: parsed.perusahaan ?? ALL, jenisPajak: parsed.jenisPajak ?? ALL, status: parsed.status ?? ALL, search: parsed.search ?? "" }); } refreshData(); }, []);
+  useEffect(() => { const saved = localStorage.getItem(FILTER_STORAGE_KEY); if (saved) { const parsed = JSON.parse(saved) as Partial<Filters>; setFilters({ tahun: parsed.tahun === ALL ? ALL : normalizeYear(parsed.tahun), masaPajak: parsed.masaPajak && (parsed.masaPajak === ALL || monthIndex(parsed.masaPajak) >= 0) ? parsed.masaPajak : ALL, perusahaan: parsed.perusahaan ?? ALL, jenisPajak: parsed.jenisPajak ?? ALL, status: parsed.status ?? ALL, search: parsed.search ?? "" }); } refreshData(); }, []);
   useEffect(() => localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(filters)), [filters]);
   const baseRows = useMemo(() => pageMeta[page].types ? records.filter((r) => pageMeta[page].types?.includes(r.jenisPajak)) : records, [page, records]);
   const filtered = useMemo(() => baseRows.filter((r) => {
-    const matchesTahun = filters.tahun === ALL || r.tahun === filters.tahun;
-    const matchesMasaPajak = filters.masaPajak === ALL || (page === "dashboard" ? matchesMonthFilter(r.masaPajak, filters.masaPajak) : r.masaPajak === filters.masaPajak);
+    const matchesTahun = filters.tahun === ALL || normalizeYear(r.tahun) === filters.tahun;
+    const matchesMasaPajak = filters.masaPajak === ALL || matchesMonthFilter(r.masaPajak, filters.masaPajak);
     const matchesPerusahaan = filters.perusahaan === ALL || r.perusahaan === filters.perusahaan;
     const matchesJenisPajak = filters.jenisPajak === ALL || r.jenisPajak === filters.jenisPajak;
     const matchesStatus = page === "dashboard" || filters.status === ALL || r.status === filters.status;
@@ -329,7 +333,7 @@ export function TaxCoordinatorDashboard() {
     return matchesTahun && matchesMasaPajak && matchesPerusahaan && matchesJenisPajak && matchesStatus && matchesSearch;
   }), [baseRows, filters, page]);
   const options = (key: keyof TaxTransaction) => Array.from(new Set(records.map((r) => String(r[key] ?? "")))).filter(Boolean).sort((a, b) => key === "masaPajak" ? periodSort(a) - periodSort(b) : a.localeCompare(b));
-  const dashboardYearOptions = Array.from(new Set([DEFAULT_DASHBOARD_YEAR, ...options("tahun").filter((year) => Number(year) >= 2026)]));
+  const yearOptions = Array.from(new Set([DEFAULT_DASHBOARD_YEAR, ...options("tahun").filter((year) => Number(year) >= 2026)]));
   const summaryRows = useMemo(() => filtered, [filtered]);
   const dashboardRows = useMemo(() => summaryRows, [summaryRows]);
   const meta = pageMeta[page];
@@ -379,7 +383,7 @@ export function TaxCoordinatorDashboard() {
       <header className="sticky top-0 z-20 border-b border-[#D8E0EA] bg-[#EEF3F8]/90 px-4 py-3 backdrop-blur lg:hidden"><Button variant="outline" onClick={() => setDrawerOpen(true)}><Menu className="h-4 w-4" /> Menu</Button></header>
       <section className="space-y-6 p-4 sm:p-6 xl:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1>{meta.subtitle && <p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p>}</div>{isManualPage(page) && page !== "dashboard" && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
-        <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: page === "dashboard" ? dashboardYearOptions : options("tahun"), masaPajak: page === "dashboard" ? MONTH_NAMES : options("masaPajak"), perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard" && page !== "documents"} showStatusAndSearch={page !== "documents" && page !== "dashboard"} />
+        <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: yearOptions, masaPajak: MONTH_NAMES, perusahaan: options("perusahaan"), jenisPajak: TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard" && page !== "documents"} showStatusAndSearch={page !== "documents" && page !== "dashboard"} />
         <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
         <Input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" onChange={uploadPdf} className="hidden" />
         <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{loading ? "Memuat data pajak..." : message}{!records.length && !loading && " KPI akan menampilkan 0 sampai data tersedia."}{lastSaved && <span className="ml-2 text-slate-500">Last saved: {new Date(lastSaved).toLocaleString("id-ID")}</span>}</div>

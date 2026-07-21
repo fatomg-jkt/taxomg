@@ -21,6 +21,7 @@ export type TaxRecord = {
 
 export type UploadTaxPage = "ppn" | "pph21" | "unifikasi" | "pb1" | "umkm";
 
+const DEFAULT_UPLOAD_YEAR = "2026";
 const UPLOAD_MONTHS = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
 const MONTH_ALIASES: Record<string, number> = {
   jan: 0, januari: 0, feb: 1, februari: 1, mar: 2, maret: 2, apr: 3, april: 3,
@@ -71,7 +72,7 @@ export function parsePageTaxWorkbook(arrayBuffer: ArrayBuffer, page: UploadTaxPa
   return rows.slice(1).filter((row) => row.some((cell) => clean(cell))).map((row, index) => {
     const company = clean(value(row, "Perusahaan"));
     const period = uploadPeriod(value(row, "Masa Pajak"));
-    const year = clean(value(row, "Tahun")) || "2026";
+    const year = normalizeUploadYear(value(row, "Tahun"));
     const ntpnNtpd = clean(value(row, "NTPN/NTPD"));
     const dpp = num(value(row, "DPP"));
     const ppnKeluaran = num(value(row, "PPN Keluaran"));
@@ -113,16 +114,18 @@ function num(value: unknown) {
   return Number.isFinite(parsed) ? Math.round(parsed) : 0;
 }
 
+function normalizeUploadYear(value: unknown) { const year = Number(clean(value)); return Number.isFinite(year) && year >= 2026 ? String(Math.trunc(year)) : DEFAULT_UPLOAD_YEAR; }
+
 function masa(value: unknown) {
   if (value instanceof Date) return `${MONTHS[value.getMonth()]}-${String(value.getFullYear()).slice(-2)}`;
   if (typeof value === "number" && value > 20000) {
     const d = XLSX.SSF.parse_date_code(value);
-    return d ? `${MONTHS[d.m - 1]}-${String(d.y).slice(-2)}` : "";
+    return d ? `${MONTHS[d.m - 1]}-${String(Math.max(d.y, 2026)).slice(-2)}` : "";
   }
   const text = clean(value);
   if (!text) return "";
   const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) return `${MONTHS[parsed.getMonth()]}-${String(parsed.getFullYear()).slice(-2)}`;
+  if (!Number.isNaN(parsed.getTime())) return `${MONTHS[parsed.getMonth()]}-${String(Math.max(parsed.getFullYear(), 2026)).slice(-2)}`;
   return text;
 }
 
