@@ -2,7 +2,7 @@ import { get, put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
 const fileName = "update-saldo-data.json";
-const emptyPayload = { records: [], updatedAt: null };
+const emptyPayload = { financeData: { accounts: [], deviceStatus: [], lastUpdated: null }, updatedAt: null };
 const noStoreHeaders = { "Cache-Control": "no-store" };
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,8 @@ export async function POST(request: Request) {
   if (!process.env.TAXOMG_STORE_ID) return NextResponse.json({ ok: false, error: "Missing TAXOMG_STORE_ID" }, { status: 500 });
   const payload = await request.json().catch(() => ({}));
   const updatedAt = new Date().toISOString();
-  const body = JSON.stringify({ records: Array.isArray(payload.records) ? payload.records : [], updatedAt }, null, 2);
+  const financeData = payload.financeData ?? { accounts: Array.isArray(payload.records) ? payload.records : [], deviceStatus: [], lastUpdated: updatedAt };
+  const body = JSON.stringify({ financeData: { accounts: Array.isArray(financeData.accounts) ? financeData.accounts : [], deviceStatus: Array.isArray(financeData.deviceStatus) ? financeData.deviceStatus : [], lastUpdated: updatedAt }, updatedAt }, null, 2);
   const blob = await put(fileName, body, { access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: true, storeId: process.env.TAXOMG_STORE_ID });
   return NextResponse.json({ ok: true, updatedAt, url: blob.url });
 }
