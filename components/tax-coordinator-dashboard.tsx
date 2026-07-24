@@ -86,7 +86,7 @@ const taxNavItems = [
   ["dashboard", Home, "Dashboard Tax All Group"], ["ppn", Receipt, "PPN"], ["pph21", Receipt, "PPh Pasal 21"], ["unifikasi", Receipt, "PPh Unifikasi"], ["pb1", Building2, "PB1"], ["umkm", Building2, "PPh UMKM"], ["documents", FileArchive, "Dokumen Pajak"],
 ] as const;
 const financeNavItems = [
-  ["financeOverview", WalletCards, "Overview"], ["financeDetails", Landmark, "Brand Details"], ["financeDevices", ShieldCheck, "Device Status"], ["financeObsidian", Landmark, "Obsidian"], ["finance1001", WalletCards, "1001"], ["financeResto", Building2, "Resto"],
+  ["financeOverview", WalletCards, "Overview"], ["financeDetails", Landmark, "Brand Details"], ["financeDevices", ShieldCheck, "Device Status"],
 ] as const;
 
 function clean(value: unknown) { return String(value ?? "").trim(); }
