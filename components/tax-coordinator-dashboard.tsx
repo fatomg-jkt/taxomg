@@ -120,6 +120,12 @@ function toDateInputValue(value: unknown) {
   const match = normalized.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   return match ? `${match[3]}-${match[2]}-${match[1]}` : clean(value);
 }
+function normalizePaymentDateForStorage(value: unknown) {
+  const text = clean(value);
+  if (!text) return "";
+  const dateInputValue = toDateInputValue(text);
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateInputValue) ? dateInputValue : "";
+}
 function normalizePeriod(value: unknown) {
   if (typeof value === "number" && value > 20000) {
     const d = XLSX.SSF.parse_date_code(value);
@@ -233,7 +239,7 @@ function normalizeManualRecord(form: ManualForm): TaxTransaction {
   const pajakTerhutang = isPpn ? (clean(form.totalPembayaranPpn) ? numberValue(form.totalPembayaranPpn) : computedPpn) : numberValue(form.pajak);
   const statusAuto = automaticStatus(pajakTerhutang, form.ntpnNtpd, form.keterangan, dppNumber);
   const now = new Date().toISOString();
-  return { id: form.id || `manual-${crypto.randomUUID()}`, perusahaan: clean(form.perusahaan), tahun: normalizeYear(form.tahun), masaPajak: clean(form.masaPajak), jenisPajak: form.jenisPajak, dpp: dppNumber, pajakTerhutang, ntpnNtpd: clean(form.ntpnNtpd), tanggalBayar: normalizePaymentDate(form.tanggalBayar), ppnKeluaran: isPpn ? numberValue(form.ppnKeluaran) : undefined, ppnMasukan: isPpn ? numberValue(form.ppnMasukan) : undefined, pmTidakDikreditkan: isPpn ? numberValue(form.pmTidakDikreditkan) : undefined, status: clean(form.status) || displayStatus(statusAuto), statusAuto, keterangan: clean(form.keterangan) || (isPpn ? `PPN Keluaran ${rupiah(numberValue(form.ppnKeluaran))}; PPN Masukan ${rupiah(numberValue(form.ppnMasukan))}; PM Tidak Dikreditkan ${rupiah(numberValue(form.pmTidakDikreditkan))}` : ""), sourceData: "Manual Input", sourceSheet: "Manual Input", sourceRow: 0, createdAt: now, updatedAt: now };
+  return { id: form.id || `manual-${crypto.randomUUID()}`, perusahaan: clean(form.perusahaan), tahun: normalizeYear(form.tahun), masaPajak: clean(form.masaPajak), jenisPajak: form.jenisPajak, dpp: dppNumber, pajakTerhutang, ntpnNtpd: clean(form.ntpnNtpd), tanggalBayar: normalizePaymentDateForStorage(form.tanggalBayar), ppnKeluaran: isPpn ? numberValue(form.ppnKeluaran) : undefined, ppnMasukan: isPpn ? numberValue(form.ppnMasukan) : undefined, pmTidakDikreditkan: isPpn ? numberValue(form.pmTidakDikreditkan) : undefined, status: clean(form.status) || displayStatus(statusAuto), statusAuto, keterangan: clean(form.keterangan) || (isPpn ? `PPN Keluaran ${rupiah(numberValue(form.ppnKeluaran))}; PPN Masukan ${rupiah(numberValue(form.ppnMasukan))}; PM Tidak Dikreditkan ${rupiah(numberValue(form.pmTidakDikreditkan))}` : ""), sourceData: "Manual Input", sourceSheet: "Manual Input", sourceRow: 0, createdAt: now, updatedAt: now };
 }
 function validateManualForm(form: ManualForm) {
   const errors: Record<string, string> = {};
@@ -242,9 +248,8 @@ function validateManualForm(form: ManualForm) {
   if (!clean(form.masaPajak)) errors.masaPajak = "Masa Pajak wajib diisi.";
   if (!clean(form.jenisPajak)) errors.jenisPajak = "Jenis Pajak wajib diisi.";
   if (clean(form.tanggalBayar)) {
-    const normalizedTanggalBayar = normalizePaymentDate(form.tanggalBayar);
-    const dateInputValue = toDateInputValue(normalizedTanggalBayar);
-    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(normalizedTanggalBayar)) errors.tanggalBayar = "Tanggal Bayar harus format dd/mm/yyyy.";
+    const dateInputValue = normalizePaymentDateForStorage(form.tanggalBayar);
+    if (!dateInputValue) errors.tanggalBayar = "Tanggal Bayar harus dipilih dari kalender.";
     else if (dateInputValue < PAYMENT_DATE_MIN || dateInputValue > PAYMENT_DATE_MAX) errors.tanggalBayar = "Tanggal Bayar hanya boleh dari 01/01/2026 sampai 31/12/2026.";
   }
   const numericFields = form.jenisPajak === "PPN" ? [["ppnKeluaran", form.ppnKeluaran], ["ppnMasukan", form.ppnMasukan], ["pmTidakDikreditkan", form.pmTidakDikreditkan], ["totalPembayaranPpn", form.totalPembayaranPpn]] : [["dpp", form.dpp], ["pajak", form.pajak]];
