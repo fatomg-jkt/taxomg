@@ -13,6 +13,8 @@ import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { canAccessArea, type UserRole } from "@/lib/user-access";
+import { ControlOmzetDashboard } from "@/components/control-omzet-dashboard";
+import type { ControlOmzetRow } from "@/lib/control-omzet";
 
 const FILTER_STORAGE_KEY = "tax-dashboard-filters-v1";
 const DEFAULT_DASHBOARD_YEAR = "2026";
@@ -30,7 +32,7 @@ const PROFESSIONAL_FONT_STACK = "Inter, 'Plus Jakarta Sans', Manrope, ui-sans-se
 
 type TaxType = (typeof TAX_TYPES)[number];
 type Status = (typeof STATUSES)[number];
-type Page = "dashboard" | "ppn" | "pph21" | "unifikasi" | "pb1" | "umkm" | "documents" | "financeOverview" | "financeDetails" | "financeDevices" | "financeObsidian" | "finance1001" | "financeResto";
+type Page = "dashboard" | "ppn" | "pph21" | "unifikasi" | "pb1" | "umkm" | "documents" | "controlOmzet" | "financeOverview" | "financeDetails" | "financeDevices" | "financeObsidian" | "finance1001" | "financeResto";
 type ParseResult = { records: TaxTransaction[]; errors: string[]; sheetsRead: string[] };
 
 type TaxTransaction = {
@@ -75,6 +77,7 @@ const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[
   pb1: { title: "PB1", subtitle: "Monitoring Pajak Daerah", types: ["PB1"] },
   umkm: { title: "PPh UMKM", subtitle: "Monitoring Pajak Atas Usaha Mikro, Kecil dan Menengah", types: ["PPh UMKM"] },
   documents: { title: "Dokumen Pajak", subtitle: "Daftar SPT, Billing, dan SSP" },
+  controlOmzet: { title: "Control Omzet", subtitle: "Monitoring omzet, omzet terlapor, selisih, dan persentase pelaporan per masa pajak." },
   financeOverview: { title: "Dashboard Finance", subtitle: "Overview saldo, brand details, dan device status dari Excel update saldo." },
   financeDetails: { title: "Brand Details", subtitle: "Struktur brand, group, entity, dan rekening finance." },
   financeDevices: { title: "Device Status", subtitle: "Monitoring device finance dan operasional." },
@@ -84,7 +87,7 @@ const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[
 };
 
 const taxNavItems = [
-  ["dashboard", Home, "Dashboard Tax All Group"], ["ppn", Receipt, "PPN"], ["pph21", Receipt, "PPh Pasal 21"], ["unifikasi", Receipt, "PPh Unifikasi"], ["pb1", Building2, "PB1"], ["umkm", Building2, "PPh UMKM"], ["documents", FileArchive, "Dokumen Pajak"],
+  ["dashboard", Home, "Dashboard Tax All Group"], ["ppn", Receipt, "PPN"], ["pph21", Receipt, "PPh Pasal 21"], ["unifikasi", Receipt, "PPh Unifikasi"], ["pb1", Building2, "PB1"], ["umkm", Building2, "PPh UMKM"], ["documents", FileArchive, "Dokumen Pajak"], ["controlOmzet", TrendingUp, "Control Omzet"],
 ] as const;
 const financeNavItems = [
   ["financeOverview", WalletCards, "Overview"], ["financeDetails", Landmark, "Brand Details"], ["financeDevices", ShieldCheck, "Device Status"],
@@ -362,6 +365,7 @@ async function loadStaticUploadHistory() {
 
 export function TaxCoordinatorDashboard({ user, onLogout }: { user: { email: string; role: UserRole }; onLogout: () => void }) {
   const [records, setRecords] = useState<TaxTransaction[]>([]);
+  const [controlOmzetData, setControlOmzetData] = useState<ControlOmzetRow[]>([]);
   const [financeAccounts, setFinanceAccounts] = useState<FinanceAccount[]>([]);
   const [financeDevices, setFinanceDevices] = useState<FinanceDeviceStatus[]>(DEFAULT_DEVICE_STATUS);
   const [financeLastSaved, setFinanceLastSaved] = useState<string | null>(null);
@@ -400,10 +404,26 @@ export function TaxCoordinatorDashboard({ user, onLogout }: { user: { email: str
       setRecords(loaded); setSummaryOverrides(payload.summaryOverrides ?? {}); setLastSaved(payload.updatedAt ?? null); setUploadBatches([]);
       await loadPdfDocuments();
       await loadUpdateSaldoData();
+      await loadControlOmzetData();
       setMessage(loaded.length ? "Data berhasil dimuat dari Blob bersama." : "Blob kosong. Dashboard tampil Rp 0 sampai data diimport/manual lalu Save to Cloud.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat data Blob.");
     } finally { setLoading(false); }
+  }
+  async function loadControlOmzetData() {
+    const response = await fetch("/api/control-omzet-data", { cache: "no-store" });
+    const payload = await response.json().catch(() => ({ controlOmzetData: [] }));
+    setControlOmzetData(Array.isArray(payload.controlOmzetData) ? payload.controlOmzetData : []);
+  }
+  async function saveControlOmzetToCloud() {
+    const password = await verifyPassword(); if (!password) return;
+    setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/control-omzet-data", { method: "POST", headers: { "Content-Type": "application/json", "x-dashboard-password": password }, body: JSON.stringify({ controlOmzetData }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Save to Cloud Control Omzet gagal.");
+      setMessage("Save to Cloud berhasil. controlOmzetData tersimpan terpisah.");
+    } catch (err) { setError(err instanceof Error ? err.message : "Save to Cloud Control Omzet gagal."); } finally { setBusy(false); }
   }
   async function loadUpdateSaldoData() {
     const response = await fetch("/api/update-saldo-data", { cache: "no-store" });
@@ -548,13 +568,13 @@ export function TaxCoordinatorDashboard({ user, onLogout }: { user: { email: str
       <header className="sticky top-0 z-20 border-b border-[#D8E0EA] bg-[#EEF3F8]/90 px-4 py-3 backdrop-blur lg:hidden"><Button variant="outline" onClick={() => setDrawerOpen(true)}><Menu className="h-4 w-4" /> Menu</Button></header>
       {accessDenied ? <AccessDenied onBack={() => navigateToPage(user.role === "FINANCE_USER" ? "financeOverview" : "dashboard")} /> : <section className="space-y-6 p-4 sm:p-6 xl:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1>{meta.subtitle && <p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p>}</div>{isManualPage(page) && page !== "dashboard" && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
-        {isFinancePage(page) ? <FinanceActionBar filters={financeFilters} setFilters={setFinanceFilters} options={financeOptions} activeTab={financeTabFromPage(page)} setPage={navigateToPage} onQuickUpdate={() => setQuickSaldoOpen(true)} onSave={saveUpdateSaldoToCloud} saving={busy} /> : <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: yearOptions, masaPajak: MONTH_NAMES, perusahaan: options("perusahaan"), jenisPajak: page === "dashboard" ? DASHBOARD_FILTER_TAX_TYPES : TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: FILTER_STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard" && page !== "documents" && !isFinancePage(page)} showStatusAndSearch={page !== "documents" && page !== "dashboard" && !isFinancePage(page)} />}
+        {page === "controlOmzet" ? null : isFinancePage(page) ? <FinanceActionBar filters={financeFilters} setFilters={setFinanceFilters} options={financeOptions} activeTab={financeTabFromPage(page)} setPage={navigateToPage} onQuickUpdate={() => setQuickSaldoOpen(true)} onSave={saveUpdateSaldoToCloud} saving={busy} /> : <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: yearOptions, masaPajak: MONTH_NAMES, perusahaan: options("perusahaan"), jenisPajak: page === "dashboard" ? DASHBOARD_FILTER_TAX_TYPES : TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: FILTER_STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard" && page !== "documents" && !isFinancePage(page)} showStatusAndSearch={page !== "documents" && page !== "dashboard" && !isFinancePage(page)} />}
         <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
         <Input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" onChange={uploadPdf} className="hidden" />
         <Input ref={updateSaldoInputRef} type="file" accept=".xlsx,.xls" onChange={importUpdateSaldoExcel} className="hidden" />
-        <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{loading ? "Memuat data pajak..." : message}{!records.length && !loading && " KPI akan menampilkan 0 sampai data tersedia."}{lastSaved && <span className="ml-2 text-slate-500">Last saved: {new Date(lastSaved).toLocaleString("id-ID")}</span>}</div>
+        {page !== "controlOmzet" && <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{loading ? "Memuat data pajak..." : message}{!records.length && !loading && " KPI akan menampilkan 0 sampai data tersedia."}{lastSaved && <span className="ml-2 text-slate-500">Last saved: {new Date(lastSaved).toLocaleString("id-ID")}</span>}</div>}
         {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
-        {isFinancePage(page) ? <FinanceDashboard page={page as FinancePage} accounts={financeScopedAccounts} allAccounts={financeAccounts} devices={financeDevices} setDevices={setFinanceDevices} filters={financeFilters} lastSaved={financeLastSaved} onAddAccount={addFinanceAccount} onUpdateAccount={updateFinanceAccount} onDeleteAccount={deleteFinanceAccount} /> : page === "documents" ? <Documents documents={pdfDocuments} uploading={pdfUploading} onUpload={() => pdfInputRef.current?.click()} /> : page === "dashboard" ? <DashboardOverview rows={dashboardRows} documentCount={pdfDocuments.length} /> : <><KpiGrid items={buildKpis(page, summaryRows, summaryOverrides)} onEdit={async (label, value) => { const password = await verifyPassword(); if (!password) return; const input = window.prompt(`Edit nominal ${label}`, String(value)); if (input === null) return; if (input === "") { setSummaryOverrides((cur) => { const next = { ...cur }; delete next[label]; return next; }); } else { setSummaryOverrides((cur) => ({ ...cur, [label]: numberValue(input) })); } setMessage("Override summary diubah. Klik Save to Cloud untuk persist."); }} /><TransactionTable rows={summaryRows} title={`Tabel detail ${meta.title}`} isDashboard={false} onEdit={openManual} onDelete={deleteManual} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} hideTaxType={page === "ppn"} /></>}
+        {page === "controlOmzet" ? <ControlOmzetDashboard data={controlOmzetData} setData={setControlOmzetData} saving={busy} onSave={saveControlOmzetToCloud} /> : isFinancePage(page) ? <FinanceDashboard page={page as FinancePage} accounts={financeScopedAccounts} allAccounts={financeAccounts} devices={financeDevices} setDevices={setFinanceDevices} filters={financeFilters} lastSaved={financeLastSaved} onAddAccount={addFinanceAccount} onUpdateAccount={updateFinanceAccount} onDeleteAccount={deleteFinanceAccount} /> : page === "documents" ? <Documents documents={pdfDocuments} uploading={pdfUploading} onUpload={() => pdfInputRef.current?.click()} /> : page === "dashboard" ? <DashboardOverview rows={dashboardRows} documentCount={pdfDocuments.length} /> : <><KpiGrid items={buildKpis(page, summaryRows, summaryOverrides)} onEdit={async (label, value) => { const password = await verifyPassword(); if (!password) return; const input = window.prompt(`Edit nominal ${label}`, String(value)); if (input === null) return; if (input === "") { setSummaryOverrides((cur) => { const next = { ...cur }; delete next[label]; return next; }); } else { setSummaryOverrides((cur) => ({ ...cur, [label]: numberValue(input) })); } setMessage("Override summary diubah. Klik Save to Cloud untuk persist."); }} /><TransactionTable rows={summaryRows} title={`Tabel detail ${meta.title}`} isDashboard={false} onEdit={openManual} onDelete={deleteManual} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} hideTaxType={page === "ppn"} /></>}
       </section>}
     </div>
     {modalOpen && <ManualModal page={page} form={form} setForm={setForm} errors={formErrors} onClose={() => setModalOpen(false)} onSave={saveManual} saving={busy} />}
