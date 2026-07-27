@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { parsePageTaxWorkbook, type TaxRecord, type UploadTaxPage } from "@/src/lib/parseTaxWorkbook";
 import { Building2, CheckCircle2, Download, Edit3, Eye, FileArchive, FileSpreadsheet, Home, Landmark, Menu, Plus, Receipt, ShieldCheck, TrendingDown, TrendingUp, Trash2, Upload, WalletCards, X } from "lucide-react";
@@ -702,9 +702,54 @@ function FinanceDashboard({ page, accounts, allAccounts, devices, setDevices, fi
   const filtered = accounts.filter((a) => (filters.group === ALL || a.group === filters.group) && (!filters.search || `${a.brand} ${a.group} ${a.entity} ${a.accountName} ${a.provider} ${a.accountNumber}`.toLowerCase().includes(filters.search.toLowerCase()))).sort((a,b)=> filters.sort === "balance" ? b.balance - a.balance : filters.sort === "name" ? a.brand.localeCompare(b.brand) : DEFAULT_FINANCE_BRANDS.indexOf(a.brand) - DEFAULT_FINANCE_BRANDS.indexOf(b.brand));
   return <div className="space-y-6"><div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />Data finance tersimpan sebagai financeData terpisah dari taxData. {lastSaved && <span className="ml-2 text-slate-500">Last saved: {new Date(lastSaved).toLocaleString("id-ID")}</span>}</div>{tab === "overview" ? <FinanceOverview accounts={allAccounts} /> : tab === "devices" ? <DeviceStatusTable rows={devices} setRows={setDevices} /> : <BrandDetails accounts={filtered} allAccounts={allAccounts} scopedBrand={scopedBrand} onAddAccount={onAddAccount} onUpdateAccount={onUpdateAccount} onDeleteAccount={onDeleteAccount} />}</div>;
 }
-function financeKpiAccent(label: string) { if (label === "Total Saldo Obsidian") return "#0F2147"; if (label === "Total Saldo 1001") return "#EC4899"; if (label === "Total Saldo Resto") return "#10B981"; return ""; }
-function FinanceOverview({ accounts }: { accounts: FinanceAccount[] }) { const summary = financeSummary(accounts); const providers = Array.from(new Set(accounts.map((a) => a.provider).filter(Boolean))); const providerData = providers.map((p) => ({ name: p, value: accounts.filter((a) => a.provider === p).reduce((t, r) => t + r.balance, 0) })); const colors = ["#2563eb", "#16a34a", "#f97316", "#7c3aed", "#dc2626", "#0891b2"]; const total = accounts.reduce((a,r)=>a+r.balance,0); const kpis = [{label:"Total Saldo All Brand", value:total, money:true}, {label:"Total Saldo Obsidian", value:summary.find(s=>s.brand==="Obsidian")?.total ?? 0, money:true}, {label:"Total Saldo 1001", value:summary.find(s=>s.brand==="1001")?.total ?? 0, money:true}, {label:"Total Saldo Resto", value:summary.find(s=>s.brand==="Resto")?.total ?? 0, money:true}, {label:"Jumlah Brand", value:new Set(accounts.map(a=>a.brand)).size}, {label:"Jumlah Rekening/Akun", value:accounts.length}, {label:"Jumlah Bank/Provider", value:providers.length}, {label:"Jumlah Payment Gateway", value:accounts.filter(a=>a.accountType==="Payment Gateway").length}]; return <div className="space-y-6"><section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">{kpis.map((item)=>{ const accent = financeKpiAccent(item.label); return <Card key={item.label} style={accent ? { borderTopColor: accent } : undefined} className={cn("rounded-3xl border-[#D8E0EA] bg-white shadow-sm", accent && "border-t-4")}><CardContent className="p-5"><p className="text-xs font-extrabold uppercase text-slate-500">{accent && <span className="mr-2 inline-block h-2.5 w-2.5 rounded-full align-middle" style={{ backgroundColor: accent }} />}{item.label}</p><p className="mt-3 text-2xl font-black">{item.money ? rupiah(item.value) : plainNumber(item.value)}</p></CardContent></Card>; })}</section><section className="grid gap-4 xl:grid-cols-3"><ChartCard title="Komposisi saldo per brand">{accounts.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={summary} dataKey="total" nameKey="brand" innerRadius="55%" outerRadius="78%">{summary.map((entry,i)=><Cell key={entry.brand} fill={colors[i%colors.length]} />)}</Pie><Tooltip formatter={(v:number)=>rupiah(v)} /><Legend /></PieChart></ResponsiveContainer> : <EmptySaldoState />}</ChartCard><ChartCard title="Saldo per brand">{accounts.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={summary}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="brand"/><YAxis tickFormatter={(v:number)=>`${Math.round(v/1000000)} jt`}/><Tooltip formatter={(v:number)=>rupiah(v)}/><Bar dataKey="total" fill="#2563eb" radius={[8,8,0,0]}/></BarChart></ResponsiveContainer> : <EmptySaldoState />}</ChartCard><ChartCard title="Saldo per provider/bank">{providerData.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={providerData}><CartesianGrid strokeDasharray="3 3" vertical={false}/><XAxis dataKey="name"/><YAxis tickFormatter={(v:number)=>`${Math.round(v/1000000)} jt`}/><Tooltip formatter={(v:number)=>rupiah(v)}/><Bar dataKey="value" fill="#16a34a" radius={[8,8,0,0]}/></BarChart></ResponsiveContainer> : <EmptySaldoState />}</ChartCard></section><FinanceSummaryTable summary={summary}/></div>; }
-function ChartCard({ title, children }: { title: string; children: ReactNode }) { return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="h-72">{children}</CardContent></Card>; }
+function FinanceOverview({ accounts }: { accounts: FinanceAccount[] }) {
+  const summary = financeSummary(accounts);
+  const providers = Array.from(new Set(accounts.map((account) => account.provider).filter(Boolean)));
+  const total = summary.reduce((sum, brand) => sum + brand.total, 0);
+  const brandColors: Record<string, string> = { Obsidian: "#111827", "1001": "#EC4899", Resto: "#10B981" };
+  const kpis = [
+    { label: "Total Saldo All Brand", value: total, money: true },
+    { label: "Jumlah Brand", value: new Set(accounts.map((account) => account.brand).filter(Boolean)).size },
+    { label: "Jumlah Rekening/Akun", value: accounts.length },
+    { label: "Jumlah Bank/Provider", value: providers.length },
+    { label: "Jumlah Payment Gateway", value: accounts.filter((account) => account.accountType === "Payment Gateway").length },
+  ];
+
+  return <div className="space-y-6">
+    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      {kpis.map((item) => <Card key={item.label} className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm">
+        <CardContent className="p-5">
+          <p className="text-xs font-extrabold uppercase text-slate-500">{item.label}</p>
+          <p className="mt-3 text-2xl font-black">{item.money ? rupiah(item.value) : plainNumber(item.value)}</p>
+        </CardContent>
+      </Card>)}
+    </section>
+
+    <section>
+      <div className="mb-4">
+        <h2 className="text-xl font-black text-slate-950">Total Saldo per Brand</h2>
+        <p className="mt-1 text-sm font-medium text-slate-500">Ringkasan otomatis dari seluruh rekening pada Brand Details.</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {summary.map((brand) => <Card
+          key={brand.brand}
+          style={{ backgroundColor: brandColors[brand.brand] ?? "#334155" }}
+          className="overflow-hidden rounded-3xl border-0 text-white shadow-sm"
+        >
+          <CardContent className="p-6">
+            <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/70">Brand</p>
+            <h3 className="mt-1 text-2xl font-black">{brand.brand}</h3>
+            <p className="mt-7 text-sm font-semibold text-white/75">Total saldo brand</p>
+            <p className="mt-1 text-3xl font-black tracking-tight">{rupiah(brand.total)}</p>
+            <p className="mt-6 text-sm font-bold text-white/80">{plainNumber(brand.accountCount)} rekening / account</p>
+          </CardContent>
+        </Card>)}
+      </div>
+    </section>
+
+    <FinanceSummaryTable summary={summary}/>
+  </div>;
+}
 function FinanceSummaryTable({ summary }: { summary: ReturnType<typeof financeSummary> }) { return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Tabel ringkasan saldo per brand</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Brand","Jumlah Group","Jumlah Entity","Jumlah Rekening/Akun","Total Saldo","Status"].map(h=><TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{summary.length ? summary.map((r)=><TableRow key={r.brand}><TableCell className="font-bold">{r.brand}</TableCell><TableCell>{plainNumber(r.groupCount)}</TableCell><TableCell>{plainNumber(r.entityCount)}</TableCell><TableCell>{plainNumber(r.accountCount)}</TableCell><TableCell className="font-bold">{rupiah(r.total)}</TableCell><TableCell><Badge variant={r.status==="Aktif"?"success":"secondary"}>{r.status}</Badge></TableCell></TableRow>) : <TableRow><TableCell colSpan={6} className="h-32 text-center text-sm font-semibold text-slate-500">Belum ada data saldo</TableCell></TableRow>}</TableBody></Table></CardContent></Card>; }
 function brandHeaderStyle(brand: string) { if (brand === "Obsidian") return { background: "#0F2147", color: "white" }; if (brand === "1001") return { background: "#EC4899", color: "white" }; if (brand === "Resto") return { background: "#10B981", color: "white" }; return undefined; }
 function BrandDetails({ accounts, allAccounts, scopedBrand, onAddAccount, onUpdateAccount, onDeleteAccount }: { accounts: FinanceAccount[]; allAccounts: FinanceAccount[]; scopedBrand: string; onAddAccount: (brand?: string, destination?: FinanceStructureItem) => void; onUpdateAccount: (id: string, patch: Partial<FinanceAccount>) => void; onDeleteAccount: (id: string) => void }) {
