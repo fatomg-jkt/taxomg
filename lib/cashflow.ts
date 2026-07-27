@@ -1,0 +1,16 @@
+export const CASHFLOW_BRANDS = ["Obsidian", "1001", "Resto", "Triple Egg", "Wok This Way"] as const;
+export const CASHFLOW_DEPARTMENTS = ["Sales", "HRD", "FAT", "Marketing", "Operasional", "Warehouse", "Purchasing", "Development", "Management", "Lainnya"] as const;
+export const CASHFLOW_TYPES = ["Revenue", "Fix Cost", "Variable Cost", "Pindah Dana", "Pajak", "Payroll", "Operational", "Lainnya"] as const;
+export const BANK_TRANSACTION_TYPES = ["Revenue", "Fix Cost", "Pindah Dana", "Pajak", "Payroll", "Operasional", "Transfer", "Lainnya"] as const;
+
+export type CashflowEntry = { id: string; brand: string; department: string; paymentItem: string; description: string; type: string; nominal: number; date: string; week: string; source: string; notes?: string };
+export type BankMutation = { id: string; brand: string; bank: string; company: string; date: string; financeDescription: string; paymentItem: string; department: string; projectionStatus: string; transactionType: string; bankDescription: string; debit: number; credit: number; balance: number; week: string; source: string };
+export type CashflowData = { projection: CashflowEntry[]; actual: CashflowEntry[]; bankMutation: BankMutation[]; lastUpdated: string | null };
+export const EMPTY_CASHFLOW: CashflowData = { projection: [], actual: [], bankMutation: [], lastUpdated: null };
+
+export function safeAmount(value: unknown) { const parsed = typeof value === "number" ? value : Number(String(value ?? "").replace(/[^\d.-]/g, "")); return Number.isFinite(parsed) ? parsed : 0; }
+export function normalizeCashflow(payload: Partial<CashflowData> | null | undefined): CashflowData {
+  const entry = (row: Partial<CashflowEntry>): CashflowEntry => ({ id: String(row.id || `cashflow-${crypto.randomUUID()}`), brand: String(row.brand || ""), department: String(row.department || ""), paymentItem: String(row.paymentItem || ""), description: String(row.description || ""), type: String(row.type || ""), nominal: safeAmount(row.nominal), date: String(row.date || ""), week: String(row.week || ""), source: String(row.source || "Manual Input"), notes: String(row.notes || "") });
+  const bank = (row: Partial<BankMutation>): BankMutation => ({ id: String(row.id || `mutation-${crypto.randomUUID()}`), brand: String(row.brand || ""), bank: String(row.bank || ""), company: String(row.company || ""), date: String(row.date || ""), financeDescription: String(row.financeDescription || ""), paymentItem: String(row.paymentItem || ""), department: String(row.department || ""), projectionStatus: String(row.projectionStatus || "Belum Dicek"), transactionType: String(row.transactionType || ""), bankDescription: String(row.bankDescription || ""), debit: safeAmount(row.debit), credit: safeAmount(row.credit), balance: safeAmount(row.balance), week: String(row.week || ""), source: String(row.source || "Manual Input") });
+  return { projection: Array.isArray(payload?.projection) ? payload.projection.map(entry) : [], actual: Array.isArray(payload?.actual) ? payload.actual.map(entry) : [], bankMutation: Array.isArray(payload?.bankMutation) ? payload.bankMutation.map(bank) : [], lastUpdated: typeof payload?.lastUpdated === "string" ? payload.lastUpdated : null };
+}
