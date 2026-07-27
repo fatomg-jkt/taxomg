@@ -11,7 +11,7 @@ export const CONTROL_OMZET_GROUPS = [
 const GROUPS = CONTROL_OMZET_GROUPS.map((group) => group.name);
 
 export type ControlOmzetStatus = "Aman" | "Perlu Review" | "Tidak Terlapor" | "Lebih Terlapor" | "Tidak Ada Data";
-export type ControlOmzetRow = { masa: string; tahun: number; group: string; entity: string; omzet: number; terlapor: number; selisih: number; persentaseTerlapor: number };
+export type ControlOmzetRow = { masa: string; tahun: number; group: string; entity: string; omzet: number; terlapor: number; selisih: number; persentaseTerlapor: number; keterangan?: string; source?: "Manual Input" };
 
 function text(value: unknown) { return String(value ?? "").trim(); }
 function valueOf(value: unknown) {
