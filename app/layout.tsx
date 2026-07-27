@@ -4,7 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Tax Coordinator Dashboard",
+  title: "Tax & Finance Dashboard",
   description: "Multi-company tax coordination dashboard for VAT, withholding, property tax, UMKM, and document workflows.",
 };
 

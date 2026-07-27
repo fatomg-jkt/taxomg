@@ -1,5 +1,5 @@
-import { TaxCoordinatorDashboard } from "@/components/tax-coordinator-dashboard";
+import { DashboardAuth } from "@/components/dashboard-auth";
 
 export default function Home() {
-  return <TaxCoordinatorDashboard />;
+  return <DashboardAuth />;
 }
