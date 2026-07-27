@@ -1,21 +1,17 @@
 "use client";
 
-import { ChangeEvent, useMemo, useRef, useState } from "react";
-import { Cloud, Upload } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Cloud, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import {
   CONTROL_OMZET_GROUPS,
   CONTROL_OMZET_MONTHS,
-  controlOmzetStatus,
-  parseControlOmzetWorkbook,
   type ControlOmzetRow,
-  type ControlOmzetStatus,
 } from "@/lib/control-omzet";
 
 const ALL = "__all__";
-const STATUSES: ControlOmzetStatus[] = ["Aman", "Perlu Review", "Tidak Terlapor", "Lebih Terlapor", "Tidak Ada Data"];
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const GROUP_COLORS: Record<string, { group: string; entity: string; sub: string }> = {
   "1001": { group: "bg-emerald-700 text-white", entity: "bg-emerald-100 text-emerald-950", sub: "bg-emerald-50 text-emerald-900" },
@@ -24,43 +20,60 @@ const GROUP_COLORS: Record<string, { group: string; entity: string; sub: string 
   Management: { group: "bg-purple-800 text-white", entity: "bg-purple-200 text-purple-950", sub: "bg-purple-100 text-purple-900" },
 };
 
-type Filters = { tahun: string; masa: string; group: string; entity: string; status: string };
+type Filters = { tahun: string; masa: string; group: string; entity: string };
+type OmzetForm = { tahun: string; masa: string; group: string; entity: string; omzet: string; terlapor: string; keterangan: string };
+const EMPTY_FORM: OmzetForm = { tahun: "2026", masa: "", group: "", entity: "", omzet: "", terlapor: "", keterangan: "" };
 const safeNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0;
 const number = (value: unknown) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(safeNumber(value));
+const monthLabel = (masa: string, year = 2026) => `${MONTH_LABELS[CONTROL_OMZET_MONTHS.indexOf(masa as (typeof CONTROL_OMZET_MONTHS)[number])]} ${String(year).slice(-2)}`;
+const samePeriod = (stored: string, masa: string, year: number) => stored === masa || stored === monthLabel(masa, year);
+
+function parseInputNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  if (!/^-?[\d.,\s]+$/.test(trimmed)) return null;
+  const compact = trimmed.replace(/\s/g, "");
+  const comma = compact.lastIndexOf(",");
+  const dot = compact.lastIndexOf(".");
+  const decimalAt = comma > dot ? comma : dot;
+  const fraction = decimalAt >= 0 ? compact.slice(decimalAt + 1) : "";
+  const normalized = decimalAt >= 0 && fraction.length > 0 && fraction.length <= 2
+    ? `${compact.slice(0, decimalAt).replace(/[.,]/g, "")}.${fraction}`
+    : compact.replace(/[.,]/g, "");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data: ControlOmzetRow[]; setData: (rows: ControlOmzetRow[]) => void; saving: boolean; onSave: () => void }) {
-  const input = useRef<HTMLInputElement>(null);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [filters, setFilters] = useState<Filters>({ tahun: ALL, masa: ALL, group: ALL, entity: ALL, status: ALL });
+  const [modalOpen, setModalOpen] = useState(false);
+  const [form, setForm] = useState<OmzetForm>(EMPTY_FORM);
+  const [formError, setFormError] = useState("");
+  const [filters, setFilters] = useState<Filters>({ tahun: ALL, masa: ALL, group: ALL, entity: ALL });
   const years = useMemo(() => Array.from(new Set(data.map((row) => safeNumber(row.tahun)).filter(Boolean))).sort(), [data]);
   const selectedYear = filters.tahun === ALL ? (years.at(-1) ?? 2026) : Number(filters.tahun);
   const availableEntities = useMemo(() => CONTROL_OMZET_GROUPS.flatMap((group) => group.entities.map((entity) => ({ group: group.name, entity }))), []);
   const visibleGroups = useMemo(() => CONTROL_OMZET_GROUPS.map((group) => ({ ...group, entities: group.entities.filter((entity) => (filters.group === ALL || group.name === filters.group) && (filters.entity === ALL || entity === filters.entity)) })).filter((group) => group.entities.length), [filters.group, filters.entity]);
   const visibleMonths = CONTROL_OMZET_MONTHS.filter((month) => filters.masa === ALL || month === filters.masa);
-  const filtered = useMemo(() => data.filter((row) => safeNumber(row.tahun) === selectedYear && (filters.group === ALL || row.group === filters.group) && (filters.entity === ALL || row.entity === filters.entity) && (filters.status === ALL || controlOmzetStatus(row) === filters.status)), [data, filters.entity, filters.group, filters.status, selectedYear]);
-  const cellValue = (masa: string, group: string, entity: string, key: "omzet" | "terlapor") => filtered.filter((row) => row.masa === masa && row.group === group && row.entity === entity).reduce((sum, row) => sum + safeNumber(row[key]), 0);
+  const filtered = useMemo(() => data.filter((row) => safeNumber(row.tahun) === selectedYear && (filters.group === ALL || row.group === filters.group) && (filters.entity === ALL || row.entity === filters.entity)), [data, filters.entity, filters.group, selectedYear]);
+  const cellValue = (masa: string, group: string, entity: string, key: "omzet" | "terlapor") => filtered.filter((row) => samePeriod(row.masa, masa, selectedYear) && row.group === group && row.entity === entity).reduce((sum, row) => sum + safeNumber(row[key]), 0);
   const totalValue = (group: string, entity: string, key: "omzet" | "terlapor") => visibleMonths.reduce((sum, masa) => sum + cellValue(masa, group, entity, key), 0);
   // The normalized data currently has no annual-target field, so its documented safe fallback is zero.
   const remainingValue = (group: string, entity: string, key: "omzet" | "terlapor") => 0 - totalValue(group, entity, key);
   const update = (key: keyof Filters, value: string) => setFilters((current) => ({ ...current, [key]: value, ...(key === "group" ? { entity: ALL } : {}) }));
 
-  function upload(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setError(""); setMessage("");
-    if (!/\.xlsx?$/i.test(file.name)) { setError("Format Excel Control Omzet tidak sesuai."); event.target.value = ""; return; }
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = parseControlOmzetWorkbook(reader.result as ArrayBuffer);
-        setData(parsed);
-        setMessage(parsed.length ? `${parsed.length} baris Control Omzet berhasil dimuat. Data lama telah diganti.` : "Excel kosong. Struktur tabel tetap siap digunakan.");
-      } catch (cause) { setError(cause instanceof Error ? cause.message : "Format Excel Control Omzet tidak sesuai."); }
-      finally { event.target.value = ""; }
-    };
-    reader.onerror = () => { setError("File Excel tidak dapat dibaca."); event.target.value = ""; };
-    reader.readAsArrayBuffer(file);
+  function saveManualInput() {
+    if (!form.tahun || !form.masa || !form.group || !form.entity) { setFormError("Tahun, Masa Pajak, Group, dan Entity wajib diisi."); return; }
+    const omzet = parseInputNumber(form.omzet);
+    const terlapor = parseInputNumber(form.terlapor);
+    if (omzet === null || terlapor === null) { setFormError("Omset dan Terlapor harus berupa angka yang valid."); return; }
+    const tahun = Number(form.tahun);
+    const masa = CONTROL_OMZET_MONTHS[MONTH_LABELS.indexOf(form.masa.split(" ")[0])];
+    if (!masa) { setFormError("Masa Pajak tidak valid."); return; }
+    const nextRow: ControlOmzetRow = { tahun, masa: form.masa, group: form.group, entity: form.entity, omzet, terlapor, keterangan: form.keterangan, source: "Manual Input", selisih: omzet - terlapor, persentaseTerlapor: omzet === 0 ? 0 : terlapor / omzet * 100 };
+    const existingIndex = data.findIndex((row) => row.tahun === tahun && samePeriod(row.masa, masa, tahun) && row.group === form.group && row.entity === form.entity);
+    setData(existingIndex >= 0 ? data.map((row, index) => index === existingIndex ? { ...row, ...nextRow } : row) : [...data, nextRow]);
+    setError(""); setFormError(""); setForm(EMPTY_FORM); setModalOpen(false);
   }
 
   return <div className="space-y-5">
@@ -71,14 +84,11 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
           ["masa", "Semua Masa Pajak", [...CONTROL_OMZET_MONTHS]],
           ["group", "Semua Group", CONTROL_OMZET_GROUPS.map((group) => group.name)],
           ["entity", "Semua Entity", availableEntities.filter((item) => filters.group === ALL || item.group === filters.group).map((item) => item.entity)],
-          ["status", "Semua Status", STATUSES],
         ] as [keyof Filters, string, readonly string[]][]).map(([key, label, options]) => <Select key={key} value={filters[key]} onChange={(event) => update(key, event.target.value)} className="h-11 min-w-40 flex-1 rounded-xl border-slate-200 bg-white"><option value={ALL}>{label}</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</Select>)}
-        <Button onClick={() => input.current?.click()} className="h-11 rounded-xl bg-blue-600 px-5 font-bold hover:bg-blue-700"><Upload className="h-4 w-4" /> Upload Excel</Button>
         <Button onClick={onSave} disabled={saving} variant="outline" className="h-11 rounded-xl px-5 font-bold"><Cloud className="h-4 w-4" />{saving ? "Menyimpan..." : "Save to Cloud"}</Button>
-        <input ref={input} type="file" accept=".xlsx,.xls" onChange={upload} hidden />
+        <Button onClick={() => setModalOpen(true)} className="h-11 rounded-xl bg-blue-600 px-5 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> Input Data Omzet</Button>
       </CardContent>
     </Card>
-    {message && <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm font-semibold text-green-700">{message}</div>}
     {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
 
     <Card className="overflow-hidden rounded-3xl border-slate-200 shadow-sm">
@@ -88,7 +98,7 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
       </CardHeader>
       <CardContent className="p-0">
         <div className="max-h-[68vh] overflow-auto">
-          <table className="w-max min-w-full border-separate border-spacing-0 text-xs text-slate-700">
+          <table className="w-max min-w-full border-separate border-spacing-0 font-sans text-xs text-slate-700">
             <thead className="sticky top-0 z-20">
               <tr>
                 <th rowSpan={3} className="sticky left-0 z-40 min-w-24 border-b border-r border-slate-300 bg-slate-900 px-4 py-3 text-left text-sm font-extrabold text-white shadow-[2px_0_0_#cbd5e1]">Masa</th>
@@ -115,5 +125,28 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
         </div>
       </CardContent>
     </Card>
+    {modalOpen && <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+      <div role="dialog" aria-modal="true" aria-labelledby="input-omzet-title" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 p-5"><h2 id="input-omzet-title" className="text-xl font-black text-slate-950">Input Data Omzet</h2><Button variant="ghost" size="icon" onClick={() => { setModalOpen(false); setFormError(""); }}><X className="h-5 w-5" /></Button></div>
+        <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <FormSelect label="Tahun" value={form.tahun} onChange={(value) => setForm({ ...form, tahun: value })} options={["2026"]} />
+          <FormSelect label="Masa Pajak" value={form.masa} onChange={(value) => setForm({ ...form, masa: value })} options={MONTH_LABELS.map((month) => `${month} 26`)} placeholder="Pilih Masa Pajak" />
+          <FormSelect label="Group" value={form.group} onChange={(value) => setForm({ ...form, group: value, entity: "" })} options={CONTROL_OMZET_GROUPS.map((group) => group.name)} placeholder="Pilih Group" />
+          <FormSelect label="Entity" value={form.entity} onChange={(value) => setForm({ ...form, entity: value })} options={CONTROL_OMZET_GROUPS.find((group) => group.name === form.group)?.entities ?? []} placeholder="Pilih Entity" />
+          <FormInput label="Omset" value={form.omzet} onChange={(value) => setForm({ ...form, omzet: value })} />
+          <FormInput label="Terlapor" value={form.terlapor} onChange={(value) => setForm({ ...form, terlapor: value })} />
+          <label className="space-y-2 sm:col-span-2"><span className="text-sm font-bold text-slate-700">Keterangan</span><textarea value={form.keterangan} onChange={(event) => setForm({ ...form, keterangan: event.target.value })} rows={3} className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" /></label>
+          {formError && <p className="sm:col-span-2 rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{formError}</p>}
+        </div>
+        <div className="flex justify-end gap-3 border-t border-slate-200 p-5"><Button variant="outline" onClick={() => { setModalOpen(false); setFormError(""); }}>Batal</Button><Button onClick={saveManualInput} disabled={saving} className="bg-blue-600 hover:bg-blue-700">Simpan</Button></div>
+      </div>
+    </div>}
   </div>;
+}
+
+function FormSelect({ label, value, onChange, options, placeholder }: { label: string; value: string; onChange: (value: string) => void; options: readonly string[]; placeholder?: string }) {
+  return <label className="space-y-2"><span className="text-sm font-bold text-slate-700">{label}</span><Select value={value} onChange={(event) => onChange(event.target.value)} className="h-11 w-full rounded-xl"><option value="">{placeholder ?? label}</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</Select></label>;
+}
+function FormInput({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return <label className="space-y-2"><span className="text-sm font-bold text-slate-700">{label}</span><input inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} placeholder="0" className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500" /></label>;
 }
