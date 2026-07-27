@@ -1,44 +1,119 @@
 "use client";
 
 import { ChangeEvent, useMemo, useRef, useState } from "react";
-import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { Upload } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { Cloud, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CONTROL_OMZET_MONTHS, controlOmzetStatus, parseControlOmzetWorkbook, type ControlOmzetRow, type ControlOmzetStatus } from "@/lib/control-omzet";
+import {
+  CONTROL_OMZET_GROUPS,
+  CONTROL_OMZET_MONTHS,
+  controlOmzetStatus,
+  parseControlOmzetWorkbook,
+  type ControlOmzetRow,
+  type ControlOmzetStatus,
+} from "@/lib/control-omzet";
 
-const ALL = "__all__"; const GROUPS = ["1001", "Obsidian", "Resto", "Management"]; const STATUSES: ControlOmzetStatus[] = ["Aman", "Perlu Review", "Tidak Terlapor", "Lebih Terlapor"];
-const COLORS = ["#2563eb", "#7c3aed", "#f97316", "#16a34a"];
-const rupiah = (value: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(value || 0);
-const percent = (value: number) => `${new Intl.NumberFormat("id-ID", { maximumFractionDigits: 1 }).format(value || 0)}%`;
+const ALL = "__all__";
+const STATUSES: ControlOmzetStatus[] = ["Aman", "Perlu Review", "Tidak Terlapor", "Lebih Terlapor", "Tidak Ada Data"];
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const GROUP_COLORS: Record<string, { group: string; entity: string; sub: string }> = {
+  "1001": { group: "bg-emerald-700 text-white", entity: "bg-emerald-100 text-emerald-950", sub: "bg-emerald-50 text-emerald-900" },
+  Obsidian: { group: "bg-slate-800 text-white", entity: "bg-slate-200 text-slate-950", sub: "bg-slate-100 text-slate-800" },
+  Resto: { group: "bg-rose-800 text-white", entity: "bg-rose-200 text-rose-950", sub: "bg-rose-100 text-rose-900" },
+  Management: { group: "bg-purple-800 text-white", entity: "bg-purple-200 text-purple-950", sub: "bg-purple-100 text-purple-900" },
+};
+
 type Filters = { tahun: string; masa: string; group: string; entity: string; status: string };
-function aggregate(rows: ControlOmzetRow[]) { const omzet = rows.reduce((sum, row) => sum + row.omzet, 0); const terlapor = rows.reduce((sum, row) => sum + row.terlapor, 0); return { omzet, terlapor, selisih: omzet - terlapor, persentaseTerlapor: omzet ? terlapor / omzet * 100 : 0 }; }
-function badge(status: ControlOmzetStatus) { return status === "Aman" ? "bg-green-100 text-green-700" : status === "Perlu Review" ? "bg-amber-100 text-amber-700" : status === "Tidak Terlapor" ? "bg-red-100 text-red-700" : status === "Lebih Terlapor" ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-600"; }
+const safeNumber = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : 0;
+const number = (value: unknown) => new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(safeNumber(value));
 
 export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data: ControlOmzetRow[]; setData: (rows: ControlOmzetRow[]) => void; saving: boolean; onSave: () => void }) {
-  const input = useRef<HTMLInputElement>(null); const [error, setError] = useState(""); const [message, setMessage] = useState("");
+  const input = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [filters, setFilters] = useState<Filters>({ tahun: ALL, masa: ALL, group: ALL, entity: ALL, status: ALL });
-  const entities = useMemo(() => Array.from(new Set(data.map((row) => row.entity))).filter(Boolean).sort(), [data]);
-  const rows = useMemo(() => data.map((row) => ({ ...row, status: controlOmzetStatus(row) })).filter((row) => (filters.tahun === ALL || String(row.tahun) === filters.tahun) && (filters.masa === ALL || row.masa === filters.masa) && (filters.group === ALL || row.group === filters.group) && (filters.entity === ALL || row.entity === filters.entity) && (filters.status === ALL || row.status === filters.status)), [data, filters]);
-  const totals = useMemo(() => aggregate(rows), [rows]);
-  const monthly = CONTROL_OMZET_MONTHS.map((masa) => ({ masa: masa.slice(0, 3), ...aggregate(rows.filter((row) => row.masa === masa)) }));
-  const byGroup = GROUPS.map((group) => ({ name: group, value: rows.filter((row) => row.group === group).reduce((sum, row) => sum + row.omzet, 0) })).filter((item) => item.value);
-  const grouped = (key: "group" | "entity") => Array.from(new Set(rows.map((row) => row[key]))).filter(Boolean).map((name) => { const selected = rows.filter((row) => row[key] === name); const total = aggregate(selected); return { name, group: key === "entity" ? selected[0]?.group ?? "-" : "", ...total, status: controlOmzetStatus(total) }; });
-  const groupTotals = grouped("group"); const entityTotals = grouped("entity"); const top = [...entityTotals].sort((a, b) => b.selisih - a.selisih).slice(0, 5);
+  const years = useMemo(() => Array.from(new Set(data.map((row) => safeNumber(row.tahun)).filter(Boolean))).sort(), [data]);
+  const selectedYear = filters.tahun === ALL ? (years.at(-1) ?? 2026) : Number(filters.tahun);
+  const availableEntities = useMemo(() => CONTROL_OMZET_GROUPS.flatMap((group) => group.entities.map((entity) => ({ group: group.name, entity }))), []);
+  const visibleGroups = useMemo(() => CONTROL_OMZET_GROUPS.map((group) => ({ ...group, entities: group.entities.filter((entity) => (filters.group === ALL || group.name === filters.group) && (filters.entity === ALL || entity === filters.entity)) })).filter((group) => group.entities.length), [filters.group, filters.entity]);
+  const visibleMonths = CONTROL_OMZET_MONTHS.filter((month) => filters.masa === ALL || month === filters.masa);
+  const filtered = useMemo(() => data.filter((row) => safeNumber(row.tahun) === selectedYear && (filters.group === ALL || row.group === filters.group) && (filters.entity === ALL || row.entity === filters.entity) && (filters.status === ALL || controlOmzetStatus(row) === filters.status)), [data, filters.entity, filters.group, filters.status, selectedYear]);
+  const cellValue = (masa: string, group: string, entity: string, key: "omzet" | "terlapor") => filtered.filter((row) => row.masa === masa && row.group === group && row.entity === entity).reduce((sum, row) => sum + safeNumber(row[key]), 0);
+  const totalValue = (group: string, entity: string, key: "omzet" | "terlapor") => visibleMonths.reduce((sum, masa) => sum + cellValue(masa, group, entity, key), 0);
+  // The normalized data currently has no annual-target field, so its documented safe fallback is zero.
+  const remainingValue = (group: string, entity: string, key: "omzet" | "terlapor") => 0 - totalValue(group, entity, key);
   const update = (key: keyof Filters, value: string) => setFilters((current) => ({ ...current, [key]: value, ...(key === "group" ? { entity: ALL } : {}) }));
-  function upload(event: ChangeEvent<HTMLInputElement>) { const file = event.target.files?.[0]; if (!file) return; setError(""); setMessage(""); if (!/\.xlsx?$/i.test(file.name)) { setError("Format Excel Control Omzet tidak sesuai."); event.target.value = ""; return; } const reader = new FileReader(); reader.onload = () => { try { const parsed = parseControlOmzetWorkbook(reader.result as ArrayBuffer); setData(parsed); setMessage(parsed.length ? `${parsed.length} baris Control Omzet berhasil dimuat. Data lama telah diganti.` : "Excel kosong. Data Control Omzet telah dikosongkan."); } catch (cause) { setError(cause instanceof Error ? cause.message : "Format Excel Control Omzet tidak sesuai."); } finally { event.target.value = ""; } }; reader.onerror = () => { setError("Format Excel Control Omzet tidak sesuai."); event.target.value = ""; }; reader.readAsArrayBuffer(file); }
-  const Empty = () => <div className="grid h-64 place-items-center rounded-2xl border border-dashed border-slate-300 text-sm font-semibold text-slate-500">Belum ada data Control Omzet.</div>;
-  const SummaryTable = ({ entity = false }: { entity?: boolean }) => { const list = entity ? entityTotals : groupTotals; return <Card className="rounded-3xl shadow-sm"><CardHeader><CardTitle>Total per {entity ? "Entity" : "Group"}</CardTitle></CardHeader><CardContent className="overflow-auto">{list.length ? <Table><TableHeader><TableRow>{[entity ? "Entity" : "Group", ...(entity ? ["Group"] : []), "Total Omzet", "Total Terlapor", "Selisih", "% Terlapor", "Status"].map((h) => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{list.map((item) => <TableRow key={item.name}><TableCell className="font-bold">{item.name}</TableCell>{entity && <TableCell>{item.group}</TableCell>}<TableCell>{rupiah(item.omzet)}</TableCell><TableCell>{rupiah(item.terlapor)}</TableCell><TableCell>{rupiah(item.selisih)}</TableCell><TableCell>{percent(item.persentaseTerlapor)}</TableCell><TableCell><Badge className={badge(item.status)}>{item.status}</Badge></TableCell></TableRow>)}</TableBody></Table> : <Empty />}</CardContent></Card>; };
-  return <div className="space-y-6">
-    <Card className="rounded-3xl shadow-sm"><CardContent className="flex flex-wrap items-center gap-3 p-4">{([["tahun", "Semua Tahun", ["2026"]], ["masa", "Semua Masa Pajak", [...CONTROL_OMZET_MONTHS]], ["group", "Semua Group", GROUPS], ["entity", "Semua Entity", entities.filter((entity) => filters.group === ALL || data.some((row) => row.entity === entity && row.group === filters.group))], ["status", "Semua Status", STATUSES]] as [keyof Filters, string, readonly string[]][]).map(([key, label, options]) => <Select key={key} value={filters[key]} onChange={(e) => update(key, e.target.value)} className="h-11 min-w-40 flex-1 rounded-2xl"><option value={ALL}>{label}</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</Select>)}<Button onClick={() => input.current?.click()} className="h-11 rounded-2xl bg-blue-600 font-bold"><Upload className="h-4 w-4" /> Upload Excel</Button><Button onClick={onSave} disabled={saving} variant="outline" className="h-11 rounded-2xl font-bold">Save to Cloud</Button><input ref={input} type="file" accept=".xlsx,.xls" onChange={upload} hidden /></CardContent></Card>
-    {message && <div className="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm font-semibold text-green-700">{message}</div>}{error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">{[["Total Omzet", rupiah(totals.omzet)], ["Total Terlapor", rupiah(totals.terlapor)], ["Total Selisih", rupiah(totals.selisih)], ["Persentase Terlapor", percent(totals.persentaseTerlapor)], ["Jumlah Entity", new Set(rows.map((r) => r.entity)).size], ["Jumlah Masa", new Set(rows.map((r) => `${r.tahun}-${r.masa}`)).size]].map(([label, value]) => <Card key={label} className="rounded-3xl shadow-sm"><CardContent className="p-5"><p className="text-xs font-bold uppercase text-slate-500">{label}</p><p className="mt-2 break-words text-xl font-black">{value}</p></CardContent></Card>)}</section>
-    <section className="grid gap-6 xl:grid-cols-2"><Chart title="Omzet vs Terlapor per Bulan">{rows.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={monthly}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="masa" /><YAxis tickFormatter={(v) => `${Math.round(v / 1e6)} jt`} /><Tooltip formatter={(v: number) => rupiah(v)} /><Legend /><Bar dataKey="omzet" name="Omzet" fill="#2563eb" /><Bar dataKey="terlapor" name="Terlapor" fill="#16a34a" /></BarChart></ResponsiveContainer> : <Empty />}</Chart><Chart title="Komposisi Omzet per Group">{byGroup.length ? <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={byGroup} dataKey="value" nameKey="name" innerRadius="50%" outerRadius="75%">{byGroup.map((item, i) => <Cell key={item.name} fill={COLORS[i % COLORS.length]} />)}</Pie><Tooltip formatter={(v: number) => rupiah(v)} /><Legend /></PieChart></ResponsiveContainer> : <Empty />}</Chart><div className="xl:col-span-2"><Chart title="Top 5 Entity dengan Selisih Terbesar">{top.length ? <ResponsiveContainer width="100%" height="100%"><BarChart data={top} layout="vertical"><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" tickFormatter={(v) => `${Math.round(v / 1e6)} jt`} /><YAxis type="category" dataKey="name" width={170} tick={{ fontSize: 11 }} /><Tooltip formatter={(v: number) => rupiah(v)} /><Bar dataKey="selisih" name="Selisih" fill="#f97316" /></BarChart></ResponsiveContainer> : <Empty />}</Chart></div></section>
-    <Card className="rounded-3xl shadow-sm"><CardHeader><CardTitle>Tabel Detail Control Omzet</CardTitle></CardHeader><CardContent className="overflow-auto">{rows.length ? <Table><TableHeader><TableRow>{["Masa Pajak", "Group", "Entity", "Omzet", "Terlapor", "Selisih", "% Terlapor", "Status"].map((h) => <TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map((row, i) => <TableRow key={`${row.entity}-${row.masa}-${i}`}><TableCell>{row.masa} {row.tahun}</TableCell><TableCell>{row.group}</TableCell><TableCell className="min-w-56 font-semibold">{row.entity}</TableCell><TableCell>{rupiah(row.omzet)}</TableCell><TableCell>{rupiah(row.terlapor)}</TableCell><TableCell>{rupiah(row.selisih)}</TableCell><TableCell>{percent(row.persentaseTerlapor)}</TableCell><TableCell><Badge className={badge(row.status)}>{row.status}</Badge></TableCell></TableRow>)}</TableBody></Table> : <Empty />}</CardContent></Card>
-    <section className="grid gap-6 xl:grid-cols-2"><SummaryTable /><SummaryTable entity /></section>
+
+  function upload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError(""); setMessage("");
+    if (!/\.xlsx?$/i.test(file.name)) { setError("Format Excel Control Omzet tidak sesuai."); event.target.value = ""; return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = parseControlOmzetWorkbook(reader.result as ArrayBuffer);
+        setData(parsed);
+        setMessage(parsed.length ? `${parsed.length} baris Control Omzet berhasil dimuat. Data lama telah diganti.` : "Excel kosong. Struktur tabel tetap siap digunakan.");
+      } catch (cause) { setError(cause instanceof Error ? cause.message : "Format Excel Control Omzet tidak sesuai."); }
+      finally { event.target.value = ""; }
+    };
+    reader.onerror = () => { setError("File Excel tidak dapat dibaca."); event.target.value = ""; };
+    reader.readAsArrayBuffer(file);
+  }
+
+  return <div className="space-y-5">
+    <Card className="rounded-3xl border-slate-200 shadow-sm">
+      <CardContent className="flex flex-wrap items-center gap-3 p-4">
+        {([
+          ["tahun", "Semua Tahun", years.length ? years.map(String) : ["2026"]],
+          ["masa", "Semua Masa Pajak", [...CONTROL_OMZET_MONTHS]],
+          ["group", "Semua Group", CONTROL_OMZET_GROUPS.map((group) => group.name)],
+          ["entity", "Semua Entity", availableEntities.filter((item) => filters.group === ALL || item.group === filters.group).map((item) => item.entity)],
+          ["status", "Semua Status", STATUSES],
+        ] as [keyof Filters, string, readonly string[]][]).map(([key, label, options]) => <Select key={key} value={filters[key]} onChange={(event) => update(key, event.target.value)} className="h-11 min-w-40 flex-1 rounded-xl border-slate-200 bg-white"><option value={ALL}>{label}</option>{options.map((option) => <option key={option} value={option}>{option}</option>)}</Select>)}
+        <Button onClick={() => input.current?.click()} className="h-11 rounded-xl bg-blue-600 px-5 font-bold hover:bg-blue-700"><Upload className="h-4 w-4" /> Upload Excel</Button>
+        <Button onClick={onSave} disabled={saving} variant="outline" className="h-11 rounded-xl px-5 font-bold"><Cloud className="h-4 w-4" />{saving ? "Menyimpan..." : "Save to Cloud"}</Button>
+        <input ref={input} type="file" accept=".xlsx,.xls" onChange={upload} hidden />
+      </CardContent>
+    </Card>
+    {message && <div className="rounded-xl border border-green-200 bg-green-50 p-4 text-sm font-semibold text-green-700">{message}</div>}
+    {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
+
+    <Card className="overflow-hidden rounded-3xl border-slate-200 shadow-sm">
+      <CardHeader className="border-b border-slate-200 bg-white pb-4">
+        <CardTitle className="text-xl text-slate-900">YTD Control Omzet {selectedYear}</CardTitle>
+        <CardDescription>Perbandingan omzet dan nilai terlapor per masa pajak. Geser tabel untuk melihat seluruh entity.</CardDescription>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="max-h-[68vh] overflow-auto">
+          <table className="w-max min-w-full border-separate border-spacing-0 text-xs text-slate-700">
+            <thead className="sticky top-0 z-20">
+              <tr>
+                <th rowSpan={3} className="sticky left-0 z-40 min-w-24 border-b border-r border-slate-300 bg-slate-900 px-4 py-3 text-left text-sm font-extrabold text-white shadow-[2px_0_0_#cbd5e1]">Masa</th>
+                {visibleGroups.map((group) => <th key={group.name} colSpan={group.entities.length * 2} className={`border-b border-r border-white/30 px-3 py-3 text-center text-sm font-extrabold tracking-wide ${GROUP_COLORS[group.name].group}`}>{group.name}</th>)}
+              </tr>
+              <tr>{visibleGroups.flatMap((group) => group.entities.map((entity) => <th key={`${group.name}-${entity}`} colSpan={2} className={`min-w-52 border-b border-r border-slate-300 px-3 py-3 text-center font-bold ${GROUP_COLORS[group.name].entity}`}>{entity}</th>))}</tr>
+              <tr>{visibleGroups.flatMap((group) => group.entities.flatMap((entity) => ([<th key={`${entity}-omzet`} className={`min-w-32 border-b border-r border-slate-300 px-3 py-2 text-right font-bold ${GROUP_COLORS[group.name].sub}`}>Omset</th>, <th key={`${entity}-terlapor`} className={`min-w-32 border-b border-r border-slate-300 px-3 py-2 text-right font-bold ${GROUP_COLORS[group.name].sub}`}>Terlapor</th>])))}</tr>
+            </thead>
+            <tbody>
+              {visibleMonths.map((masa, index) => <tr key={masa} className={index % 2 ? "bg-slate-50" : "bg-white"}>
+                <th className="sticky left-0 z-10 border-b border-r border-slate-300 bg-inherit px-4 py-3 text-left font-bold text-slate-800 shadow-[2px_0_0_#e2e8f0]">{MONTH_LABELS[CONTROL_OMZET_MONTHS.indexOf(masa)]} {String(selectedYear).slice(-2)}</th>
+                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => (["omzet", "terlapor"] as const).map((key) => <td key={`${masa}-${entity}-${key}`} className="border-b border-r border-slate-200 px-3 py-3 text-right tabular-nums">{number(cellValue(masa, group.name, entity, key))}</td>)))}
+              </tr>)}
+              <tr className="bg-slate-800 font-extrabold text-white">
+                <th className="sticky left-0 z-10 border-r border-slate-600 bg-slate-900 px-4 py-3 text-left shadow-[2px_0_0_#475569]">Total</th>
+                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => (["omzet", "terlapor"] as const).map((key) => <td key={`total-${entity}-${key}`} className="border-r border-slate-600 px-3 py-3 text-right tabular-nums">{number(totalValue(group.name, entity, key))}</td>)))}
+              </tr>
+              <tr className="bg-amber-50 font-semibold italic text-amber-950">
+                <th className="sticky left-0 z-10 border-r border-t border-amber-200 bg-amber-100 px-4 py-3 text-left shadow-[2px_0_0_#fde68a]">Sisa</th>
+                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => (["omzet", "terlapor"] as const).map((key) => <td key={`sisa-${entity}-${key}`} className="border-r border-t border-amber-200 px-3 py-3 text-right tabular-nums">{number(remainingValue(group.name, entity, key))}</td>)))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
   </div>;
 }
-function Chart({ title, children }: { title: string; children: React.ReactNode }) { return <Card className="rounded-3xl shadow-sm"><CardHeader><CardTitle>{title}</CardTitle><CardDescription>Data mengikuti filter aktif.</CardDescription></CardHeader><CardContent className="h-80">{children}</CardContent></Card>; }

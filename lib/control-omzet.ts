@@ -2,7 +2,13 @@ import * as XLSX from "xlsx";
 
 export const CONTROL_OMZET_SHEET = "YTD Control Omzet";
 export const CONTROL_OMZET_MONTHS = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"] as const;
-const GROUPS = ["1001", "Obsidian", "Resto", "Management"];
+export const CONTROL_OMZET_GROUPS = [
+  { name: "1001", entities: ["CV Sepuluh Januari Sukses", "CV Seribu Toko Sukses", "CV Event Seribu Satu", "PT Mimama Laku Selalu", "CV Maison Yvan Indonesia"] },
+  { name: "Obsidian", entities: ["PT Prima Global Obsidian", "PT Sejuta Toko Bersama", "Omset Tidak Terlapor PGO + STB"] },
+  { name: "Resto", entities: ["PT Makan Setiap Hari", "PT Minum Setiap Hari", "PT Jajan Setiap Hari", "PT Wok This Way"] },
+  { name: "Management", entities: ["CV Obsidian Management Group", "CV Before After Class"] },
+] as const;
+const GROUPS = CONTROL_OMZET_GROUPS.map((group) => group.name);
 
 export type ControlOmzetStatus = "Aman" | "Perlu Review" | "Tidak Terlapor" | "Lebih Terlapor" | "Tidak Ada Data";
 export type ControlOmzetRow = { masa: string; tahun: number; group: string; entity: string; omzet: number; terlapor: number; selisih: number; persentaseTerlapor: number };
@@ -53,16 +59,19 @@ export function parseControlOmzetWorkbook(data: ArrayBuffer): ControlOmzetRow[] 
   const periodRowIndexes = rows.map((row, index) => ({ index, info: period(row.find((cell) => period(cell))) })).filter((item) => item.info);
   if (periodRowIndexes.length >= 2) {
     const first = periodRowIndexes[0].index;
-    const entityHeader = rows.slice(0, first).findLast((row) => row.filter((cell) => text(cell) && !/omset|omzet|terlapor/i.test(text(cell))).length >= 2) ?? [];
+    const headerRows = rows.slice(0, first);
     let group = ""; let entity = "";
     for (let column = 0; column < Math.max(...rows.map((row) => row.length)); column++) {
-      group = groupOf(entityHeader[column], group);
-      const candidate = text(entityHeader[column]);
+      const headerCells = headerRows.map((row) => text(row[column])).filter(Boolean);
+      const knownEntity = CONTROL_OMZET_GROUPS.flatMap((item) => item.entities).find((name) => headerCells.some((cell) => cell.toLowerCase().includes(name.toLowerCase())));
+      group = headerCells.map((cell) => groupOf(cell)).find(Boolean) || group;
+      const candidate = knownEntity ?? headerCells.find((cell) => !groupOf(cell) && !period(cell) && !/masa|bulan|group|omset|omzet|terlapor/i.test(cell)) ?? "";
       if (candidate && !groupOf(candidate) && !period(candidate) && !/masa|bulan|group|omset|omzet|terlapor/i.test(candidate)) entity = candidate;
       if (!entity) continue;
       const subheaders = rows.slice(Math.max(0, first - 3), first).map((row) => text(row[column]).toLowerCase()).join(" ");
       if (!/omset|omzet/.test(subheaders)) continue;
-      for (const item of periodRowIndexes) { const info = item.info!; results.push(create(info.masa, info.tahun, groupOf(entityHeader[column], group), entity, rows[item.index][column], rows[item.index][column + 1])); }
+      const knownGroup = CONTROL_OMZET_GROUPS.find((item) => item.entities.some((name) => name === entity))?.name;
+      for (const item of periodRowIndexes) { const info = item.info!; results.push(create(info.masa, info.tahun, knownGroup ?? group, entity, rows[item.index][column], rows[item.index][column + 1])); }
     }
   }
   if (results.length) return results;
