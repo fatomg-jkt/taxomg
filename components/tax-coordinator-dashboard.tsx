@@ -3,7 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { parsePageTaxWorkbook, type TaxRecord, type UploadTaxPage } from "@/src/lib/parseTaxWorkbook";
-import { Building2, CheckCircle2, Download, Edit3, Eye, FileArchive, FileSpreadsheet, Home, Landmark, Menu, Plus, Receipt, ShieldCheck, TrendingDown, TrendingUp, Trash2, Upload, WalletCards, X } from "lucide-react";
+import { Building2, CheckCircle2, Download, Edit3, Eye, FileArchive, FileSpreadsheet, Home, Landmark, LogOut, Menu, Plus, Receipt, ShieldCheck, ShieldX, TrendingDown, TrendingUp, Trash2, Upload, WalletCards, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { canAccessArea, type UserRole } from "@/lib/user-access";
 
 const FILTER_STORAGE_KEY = "tax-dashboard-filters-v1";
 const DEFAULT_DASHBOARD_YEAR = "2026";
@@ -359,7 +360,7 @@ async function loadStaticUploadHistory() {
 }
 
 
-export function TaxCoordinatorDashboard() {
+export function TaxCoordinatorDashboard({ user, onLogout }: { user: { email: string; role: UserRole }; onLogout: () => void }) {
   const [records, setRecords] = useState<TaxTransaction[]>([]);
   const [financeAccounts, setFinanceAccounts] = useState<FinanceAccount[]>([]);
   const [financeDevices, setFinanceDevices] = useState<FinanceDeviceStatus[]>(DEFAULT_DEVICE_STATUS);
@@ -372,7 +373,8 @@ export function TaxCoordinatorDashboard() {
   const [pdfUploading, setPdfUploading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [page, setPage] = useState<Page>("dashboard");
+  const [page, setPage] = useState<Page>(user.role === "FINANCE_USER" ? "financeOverview" : "dashboard");
+  const [accessDenied, setAccessDenied] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [filters, setFilters] = useState<Filters>({ tahun: DEFAULT_DASHBOARD_YEAR, masaPajak: ALL, perusahaan: ALL, jenisPajak: ALL, status: ALL, search: "" });
   const [message, setMessage] = useState("Data utama dibaca dari Vercel Blob tax-dashboard-data.json.");
@@ -459,6 +461,19 @@ export function TaxCoordinatorDashboard() {
     return { id: row.id, perusahaan: row.company, masaPajak: row.masa, tahun: normalizeYear(row.year || periodYear(row.masa)), jenisPajak: row.jenisPajak as TaxType, dpp: row.dpp, pajakTerhutang: row.pajakTerutang, ntpnNtpd: row.ntpnNtpd, status: row.status || displayStatus(statusAuto), statusAuto, keterangan: row.keterangan || "", ppnKeluaran: row.ppnKeluaran, ppnMasukan: row.ppnMasukan, pmTidakDikreditkan: row.pmTidakDikreditkan, totalPembayaranPpn: row.totalPembayaranPpn, sourceData: "Excel Import", sourceSheet: row.sourceSheet, sourceRow: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   }
   useEffect(() => { const savedSaldo = localStorage.getItem(FINANCE_FILTER_STORAGE_KEY); if (savedSaldo) setFinanceFilters({ ...financeFilters, ...JSON.parse(savedSaldo) }); const saved = localStorage.getItem(FILTER_STORAGE_KEY); if (saved) { const parsed = JSON.parse(saved) as Partial<Filters>; setFilters({ tahun: parsed.tahun === ALL ? ALL : normalizeYear(parsed.tahun), masaPajak: parsed.masaPajak && (parsed.masaPajak === ALL || monthIndex(parsed.masaPajak) >= 0) ? parsed.masaPajak : ALL, perusahaan: parsed.perusahaan ?? ALL, jenisPajak: parsed.jenisPajak ?? ALL, status: parsed.status ?? ALL, search: parsed.search ?? "" }); } refreshData(); }, []);
+  useEffect(() => {
+    const applyUrlPage = () => {
+      const requestedPage = new URLSearchParams(window.location.search).get("page");
+      if (!requestedPage || !(requestedPage in pageMeta)) return;
+      const requested = requestedPage as Page;
+      const allowed = canAccessArea(user.role, isFinancePage(requested) ? "finance" : "tax");
+      setAccessDenied(!allowed);
+      if (allowed) setPage(requested);
+    };
+    applyUrlPage();
+    window.addEventListener("popstate", applyUrlPage);
+    return () => window.removeEventListener("popstate", applyUrlPage);
+  }, [user.role]);
   useEffect(() => localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(filters)), [filters]);
   useEffect(() => localStorage.setItem(FINANCE_FILTER_STORAGE_KEY, JSON.stringify(financeFilters)), [financeFilters]);
   const baseRows = useMemo(() => pageMeta[page].types ? records.filter((r) => pageMeta[page].types?.includes(r.jenisPajak)) : records, [page, records]);
@@ -478,6 +493,15 @@ export function TaxCoordinatorDashboard() {
   const meta = pageMeta[page];
   const financeScopedAccounts = useMemo(() => { const scopedBrand = isFinancePage(page) ? financeBrand(page) : ""; return financeAccounts.filter((r) => !scopedBrand || r.brand === scopedBrand); }, [financeAccounts, page]);
   const financeOptions = { group: Array.from(new Set(financeAccounts.map((r) => r.group))).filter(Boolean).sort() };
+
+  function navigateToPage(nextPage: Page) {
+    const allowed = canAccessArea(user.role, isFinancePage(nextPage) ? "finance" : "tax");
+    setAccessDenied(!allowed);
+    const url = new URL(window.location.href);
+    url.searchParams.set("page", nextPage);
+    window.history.pushState(null, "", url);
+    if (allowed) setPage(nextPage);
+  }
 
   function updateFilter(key: keyof Filters, value: string) { setFilters((cur) => ({ ...cur, [key]: value })); }
   function openManual(entry?: TaxTransaction) { setFormErrors({}); setForm(entry ? { ...emptyManualForm(page), id: entry.id, perusahaan: entry.perusahaan, tahun: entry.tahun, masaPajak: entry.masaPajak, jenisPajak: entry.jenisPajak, dpp: String(entry.dpp), pajak: String(entry.pajakTerhutang), ntpnNtpd: entry.ntpnNtpd, tanggalBayar: normalizePaymentDate(entry.tanggalBayar), status: entry.status, keterangan: entry.keterangan, ppnKeluaran: entry.jenisPajak === "PPN" ? String(entry.ppnKeluaran ?? entry.dpp) : "", ppnMasukan: entry.jenisPajak === "PPN" ? String(entry.ppnMasukan ?? "") : "", pmTidakDikreditkan: entry.jenisPajak === "PPN" ? String(entry.pmTidakDikreditkan ?? "") : "", totalPembayaranPpn: entry.jenisPajak === "PPN" ? String(entry.pajakTerhutang) : "" } : emptyManualForm(page)); setModalOpen(true); }
@@ -519,19 +543,19 @@ export function TaxCoordinatorDashboard() {
   }
 
   return <main className="min-h-screen bg-[#EEF3F8] text-slate-950" style={page === "dashboard" ? { fontFamily: PROFESSIONAL_FONT_STACK } : undefined}>
-    <Sidebar page={page} setPage={setPage} open={drawerOpen} setOpen={setDrawerOpen} />
+    <Sidebar page={page} setPage={navigateToPage} open={drawerOpen} setOpen={setDrawerOpen} user={user} onLogout={onLogout} />
     <div className="min-h-screen lg:pl-72">
       <header className="sticky top-0 z-20 border-b border-[#D8E0EA] bg-[#EEF3F8]/90 px-4 py-3 backdrop-blur lg:hidden"><Button variant="outline" onClick={() => setDrawerOpen(true)}><Menu className="h-4 w-4" /> Menu</Button></header>
-      <section className="space-y-6 p-4 sm:p-6 xl:p-8">
+      {accessDenied ? <AccessDenied onBack={() => navigateToPage(user.role === "FINANCE_USER" ? "financeOverview" : "dashboard")} /> : <section className="space-y-6 p-4 sm:p-6 xl:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1>{meta.subtitle && <p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p>}</div>{isManualPage(page) && page !== "dashboard" && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
-        {isFinancePage(page) ? <FinanceActionBar filters={financeFilters} setFilters={setFinanceFilters} options={financeOptions} activeTab={financeTabFromPage(page)} setPage={setPage} onQuickUpdate={() => setQuickSaldoOpen(true)} onSave={saveUpdateSaldoToCloud} saving={busy} /> : <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: yearOptions, masaPajak: MONTH_NAMES, perusahaan: options("perusahaan"), jenisPajak: page === "dashboard" ? DASHBOARD_FILTER_TAX_TYPES : TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: FILTER_STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard" && page !== "documents" && !isFinancePage(page)} showStatusAndSearch={page !== "documents" && page !== "dashboard" && !isFinancePage(page)} />}
+        {isFinancePage(page) ? <FinanceActionBar filters={financeFilters} setFilters={setFinanceFilters} options={financeOptions} activeTab={financeTabFromPage(page)} setPage={navigateToPage} onQuickUpdate={() => setQuickSaldoOpen(true)} onSave={saveUpdateSaldoToCloud} saving={busy} /> : <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: yearOptions, masaPajak: MONTH_NAMES, perusahaan: options("perusahaan"), jenisPajak: page === "dashboard" ? DASHBOARD_FILTER_TAX_TYPES : TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: FILTER_STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard" && page !== "documents" && !isFinancePage(page)} showStatusAndSearch={page !== "documents" && page !== "dashboard" && !isFinancePage(page)} />}
         <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
         <Input ref={pdfInputRef} type="file" accept="application/pdf,.pdf" onChange={uploadPdf} className="hidden" />
         <Input ref={updateSaldoInputRef} type="file" accept=".xlsx,.xls" onChange={importUpdateSaldoExcel} className="hidden" />
         <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />{loading ? "Memuat data pajak..." : message}{!records.length && !loading && " KPI akan menampilkan 0 sampai data tersedia."}{lastSaved && <span className="ml-2 text-slate-500">Last saved: {new Date(lastSaved).toLocaleString("id-ID")}</span>}</div>
         {error && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
         {isFinancePage(page) ? <FinanceDashboard page={page as FinancePage} accounts={financeScopedAccounts} allAccounts={financeAccounts} devices={financeDevices} setDevices={setFinanceDevices} filters={financeFilters} lastSaved={financeLastSaved} onAddAccount={addFinanceAccount} onUpdateAccount={updateFinanceAccount} onDeleteAccount={deleteFinanceAccount} /> : page === "documents" ? <Documents documents={pdfDocuments} uploading={pdfUploading} onUpload={() => pdfInputRef.current?.click()} /> : page === "dashboard" ? <DashboardOverview rows={dashboardRows} documentCount={pdfDocuments.length} /> : <><KpiGrid items={buildKpis(page, summaryRows, summaryOverrides)} onEdit={async (label, value) => { const password = await verifyPassword(); if (!password) return; const input = window.prompt(`Edit nominal ${label}`, String(value)); if (input === null) return; if (input === "") { setSummaryOverrides((cur) => { const next = { ...cur }; delete next[label]; return next; }); } else { setSummaryOverrides((cur) => ({ ...cur, [label]: numberValue(input) })); } setMessage("Override summary diubah. Klik Save to Cloud untuk persist."); }} /><TransactionTable rows={summaryRows} title={`Tabel detail ${meta.title}`} isDashboard={false} onEdit={openManual} onDelete={deleteManual} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} hideTaxType={page === "ppn"} /></>}
-      </section>
+      </section>}
     </div>
     {modalOpen && <ManualModal page={page} form={form} setForm={setForm} errors={formErrors} onClose={() => setModalOpen(false)} onSave={saveManual} saving={busy} />}
     {quickSaldoOpen && <QuickSaldoModal accounts={financeAccounts} onClose={() => setQuickSaldoOpen(false)} onSave={(updates) => { setFinanceAccounts((rows) => rows.map((row) => updates[row.id] ? normalizeFinanceAccount({ ...row, balance: updates[row.id].balance, notes: updates[row.id].notes }) : row)); setMessage("Quick Update Saldo Hari Ini berhasil. Klik Save to Cloud agar tersimpan."); setQuickSaldoOpen(false); }} />}
@@ -570,11 +594,16 @@ function QuickSaldoModal({ accounts, onClose, onSave }: { accounts: FinanceAccou
   </div>;
 }
 
-function Sidebar({ page, setPage, open, setOpen }: { page: Page; setPage: (page: Page) => void; open: boolean; setOpen: (open: boolean) => void }) {
+function AccessDenied({ onBack }: { onBack: () => void }) {
+  return <section className="grid min-h-screen place-items-center p-6"><div className="max-w-lg rounded-3xl border border-red-100 bg-white p-8 text-center shadow-xl"><div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-red-50 text-red-600"><ShieldX className="h-8 w-8" /></div><h1 className="text-3xl font-black text-slate-950">Akses Ditolak</h1><p className="mt-3 text-sm font-semibold leading-6 text-slate-600">Anda tidak memiliki hak akses untuk membuka dashboard ini.</p><Button onClick={onBack} className="mt-6 rounded-2xl bg-blue-600 font-bold hover:bg-blue-700">Kembali ke dashboard</Button></div></section>;
+}
+
+function Sidebar({ page, setPage, open, setOpen, user, onLogout }: { page: Page; setPage: (page: Page) => void; open: boolean; setOpen: (open: boolean) => void; user: { email: string; role: UserRole }; onLogout: () => void }) {
   const renderItems = (items: typeof taxNavItems | typeof financeNavItems) => items.map(([id, Icon, label]) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition", page === id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white")}><Icon className="h-5 w-5" />{label}</button>);
   return <aside className={cn("fixed inset-y-0 left-0 z-40 w-72 transform overflow-y-auto bg-[#020617] p-5 text-white shadow-2xl transition-transform lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
     <div className="mb-8 flex items-center justify-between"><div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30"><Receipt className="h-6 w-6" /></div><div><p className="text-lg font-black">Tax Coordinator</p><p className="text-xs font-semibold text-slate-400">Tax & Finance Dashboard</p></div></div><Button variant="ghost" size="icon" className="text-white lg:hidden" onClick={() => setOpen(false)}><X className="h-5 w-5" /></Button></div>
-    <nav className="space-y-6"><div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Tax</p><div className="space-y-2">{renderItems(taxNavItems)}</div></div><div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Finance</p><div className="space-y-2">{renderItems(financeNavItems)}</div></div></nav>
+    <nav className="space-y-6">{canAccessArea(user.role, "tax") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Tax</p><div className="space-y-2">{renderItems(taxNavItems)}</div></div>}{canAccessArea(user.role, "finance") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Finance</p><div className="space-y-2">{renderItems(financeNavItems)}</div></div>}</nav>
+    <div className="mt-8 border-t border-white/10 pt-5"><p className="truncate px-4 text-sm font-bold text-white">{user.email}</p><p className="mt-1 px-4 text-xs font-semibold text-slate-400">{user.role.replaceAll("_", " ")}</p><Button onClick={onLogout} variant="ghost" className="mt-3 w-full justify-start rounded-2xl px-4 font-bold text-slate-300 hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" /> Logout</Button></div>
   </aside>;
 }
 function FilterBar({ filters, updateFilter, options, onUpload, onManual, onSave, saving, showDataEntryActions = true, showStatusAndSearch = true }: { filters: Filters; updateFilter: (key: keyof Filters, value: string) => void; options: { tahun: readonly string[]; masaPajak: readonly string[]; perusahaan: readonly string[]; jenisPajak: readonly string[]; status: readonly string[] }; onUpload: () => void; onManual: () => void; onSave: () => void; saving: boolean; showDataEntryActions?: boolean; showStatusAndSearch?: boolean }) {
