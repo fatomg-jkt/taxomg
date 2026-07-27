@@ -64,9 +64,9 @@ export function DashboardAuth() {
     <section className="w-full max-w-md rounded-[2rem] border border-white/80 bg-white p-7 shadow-2xl shadow-slate-300/50 sm:p-9">
       <div className="mb-8 flex items-center gap-4">
         <div className="grid h-14 w-14 place-items-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/30"><Receipt className="h-7 w-7" /></div>
-        <div><h1 className="text-2xl font-black tracking-tight text-slate-950">Tax Coordinator</h1><p className="text-sm font-semibold text-slate-500">Tax & Finance Dashboard</p></div>
+        <div><h1 className="text-2xl font-black tracking-tight text-slate-950">DASHBOARD</h1><p className="text-sm font-semibold text-slate-500">Finance & Tax</p></div>
       </div>
-      <div className="mb-6"><h2 className="text-xl font-black text-slate-950">Masuk ke dashboard</h2><p className="mt-2 text-sm leading-6 text-slate-600">Gunakan email yang telah didaftarkan oleh administrator.</p></div>
+      <div className="mb-6"><h2 className="text-xl font-black text-slate-950">LOGIN</h2><p className="mt-2 text-sm leading-6 text-slate-600">Gunakan email yang telah didaftarkan oleh administrator.</p></div>
       <form onSubmit={login} className="space-y-5">
         <div><label htmlFor="email" className="mb-2 block text-sm font-bold text-slate-700">Email</label><Input id="email" type="email" autoComplete="email" required autoFocus value={email} onChange={(event) => { setEmail(event.target.value); setError(""); }} placeholder="nama@company.com" className="h-12 rounded-2xl bg-white" /></div>
         {error && <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
