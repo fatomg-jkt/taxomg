@@ -85,10 +85,9 @@ const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[
   financeObsidian: { title: "Finance Obsidian", subtitle: "Detail rekening dan saldo brand Obsidian." },
   finance1001: { title: "Finance 1001", subtitle: "Detail rekening dan saldo brand 1001." },
   financeResto: { title: "Finance Resto", subtitle: "Detail rekening dan saldo brand Resto." },
-  cashflow: { title: "Cashflow", subtitle: "Monitoring proyeksi, realisasi, mutasi bank, sisa budget, dan analisis over budget." },
+  cashflow: { title: "Cashflow", subtitle: "Monitoring proyeksi, realisasi, sisa budget, dan analisis over budget." },
   cashflowProjection: { title: "Cashflow · Proyeksi", subtitle: "Input dan pengelolaan data proyeksi cashflow." },
   cashflowActual: { title: "Cashflow · Realisasi", subtitle: "Input dan pengelolaan data realisasi pengeluaran dan pemasukan." },
-  cashflowBank: { title: "Cashflow · Mutasi Bank", subtitle: "Input dan pengelolaan data mutasi bank." },
 };
 
 const taxNavItems = [
@@ -97,7 +96,7 @@ const taxNavItems = [
 const financeNavItems = [
   ["financeOverview", WalletCards, "Overview"], ["financeDetails", Landmark, "Brand Details"], ["financeDevices", ShieldCheck, "Device Status"],
 ] as const;
-const cashflowPages: CashflowPage[] = ["cashflow", "cashflowProjection", "cashflowActual", "cashflowBank"];
+const cashflowPages: CashflowPage[] = ["cashflow", "cashflowProjection", "cashflowActual"];
 function isCashflowPage(page: Page): page is CashflowPage { return cashflowPages.includes(page as CashflowPage); }
 
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -631,7 +630,7 @@ function Sidebar({ page, setPage, open, setOpen, user, onLogout }: { page: Page;
   const cashflowItem = (id: CashflowPage, label: string, nested = false) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl py-2.5 text-left text-sm font-bold transition", nested ? "pl-12 pr-4 text-xs" : "px-4", page === id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white")}>{!nested && <TrendingDown className="h-5 w-5" />}{label}</button>;
   return <aside className={cn("fixed inset-y-0 left-0 z-40 w-72 transform overflow-y-auto bg-[#020617] p-5 text-white shadow-2xl transition-transform lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
     <div className="mb-8 flex items-center justify-between"><div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30"><Receipt className="h-6 w-6" /></div><div><p className="text-lg font-black">Tax Coordinator</p><p className="text-xs font-semibold text-slate-400">Tax & Finance Dashboard</p></div></div><Button variant="ghost" size="icon" className="text-white lg:hidden" onClick={() => setOpen(false)}><X className="h-5 w-5" /></Button></div>
-    <nav className="space-y-6">{canAccessArea(user.role, "tax") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Tax</p><div className="space-y-2">{renderItems(taxNavItems)}</div></div>}{canAccessArea(user.role, "finance") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Finance</p><div className="space-y-2">{renderItems(financeNavItems)}<div>{cashflowItem("cashflow", "Cashflow")}{cashflowItem("cashflowProjection", "Proyeksi", true)}{cashflowItem("cashflowActual", "Realisasi", true)}{cashflowItem("cashflowBank", "Mutasi Bank", true)}</div></div></div>}</nav>
+    <nav className="space-y-6">{canAccessArea(user.role, "tax") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Tax</p><div className="space-y-2">{renderItems(taxNavItems)}</div></div>}{canAccessArea(user.role, "finance") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Finance</p><div className="space-y-2">{renderItems(financeNavItems)}<div>{cashflowItem("cashflow", "Cashflow")}{cashflowItem("cashflowProjection", "Proyeksi", true)}{cashflowItem("cashflowActual", "Realisasi", true)}</div></div></div>}</nav>
     <div className="mt-8 border-t border-white/10 pt-5"><p className="truncate px-4 text-sm font-bold text-white">{user.email}</p><p className="mt-1 px-4 text-xs font-semibold text-slate-400">{user.role.replaceAll("_", " ")}</p><Button onClick={onLogout} variant="ghost" className="mt-3 w-full justify-start rounded-2xl px-4 font-bold text-slate-300 hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" /> Logout</Button></div>
   </aside>;
 }
