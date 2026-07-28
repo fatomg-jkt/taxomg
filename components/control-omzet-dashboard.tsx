@@ -12,6 +12,11 @@ import {
 } from "@/lib/control-omzet";
 
 const ALL = "__all__";
+const ANNUAL_OMZET_LIMIT = 4_800_000_000;
+const OBSIDIAN_GROUP = "Obsidian";
+const PGO_ENTITY = "PT Prima Global Obsidian";
+const STB_ENTITY = "PT Sejuta Toko Bersama";
+const OBSIDIAN_UNREPORTED_ENTITY = "Omset Tidak Terlapor PGO + STB";
 const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const GROUP_COLORS: Record<string, { group: string; entity: string; sub: string }> = {
   "1001": { group: "bg-emerald-700 text-white", entity: "bg-emerald-100 text-emerald-950", sub: "bg-emerald-50 text-emerald-900" },
@@ -55,11 +60,15 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
   const availableEntities = useMemo(() => CONTROL_OMZET_GROUPS.flatMap((group) => group.entities.map((entity) => ({ group: group.name, entity }))), []);
   const visibleGroups = useMemo(() => CONTROL_OMZET_GROUPS.map((group) => ({ ...group, entities: group.entities.filter((entity) => (filters.group === ALL || group.name === filters.group) && (filters.entity === ALL || entity === filters.entity)) })).filter((group) => group.entities.length), [filters.group, filters.entity]);
   const visibleMonths = CONTROL_OMZET_MONTHS.filter((month) => filters.masa === ALL || month === filters.masa);
-  const filtered = useMemo(() => data.filter((row) => safeNumber(row.tahun) === selectedYear && (filters.group === ALL || row.group === filters.group) && (filters.entity === ALL || row.entity === filters.entity)), [data, filters.entity, filters.group, selectedYear]);
+  const yearAndGroupRows = useMemo(() => data.filter((row) => safeNumber(row.tahun) === selectedYear && (filters.group === ALL || row.group === filters.group)), [data, filters.group, selectedYear]);
+  const filtered = useMemo(() => yearAndGroupRows.filter((row) => filters.entity === ALL || row.entity === filters.entity), [filters.entity, yearAndGroupRows]);
   const cellValue = (masa: string, group: string, entity: string, key: "omzet" | "terlapor") => filtered.filter((row) => samePeriod(row.masa, masa, selectedYear) && row.group === group && row.entity === entity).reduce((sum, row) => sum + safeNumber(row[key]), 0);
   const totalValue = (group: string, entity: string, key: "omzet" | "terlapor") => visibleMonths.reduce((sum, masa) => sum + cellValue(masa, group, entity, key), 0);
-  // The normalized data currently has no annual-target field, so its documented safe fallback is zero.
-  const remainingValue = (group: string, entity: string, key: "omzet" | "terlapor") => 0 - totalValue(group, entity, key);
+  const obsidianEntityValue = (masa: string, entity: string, key: "omzet" | "terlapor") => yearAndGroupRows.filter((row) => samePeriod(row.masa, masa, selectedYear) && row.group === OBSIDIAN_GROUP && row.entity === entity).reduce((sum, row) => sum + safeNumber(row[key]), 0);
+  const obsidianUnreportedValue = (masa: string) => obsidianEntityValue(masa, PGO_ENTITY, "omzet") + obsidianEntityValue(masa, STB_ENTITY, "omzet") - obsidianEntityValue(masa, PGO_ENTITY, "terlapor") - obsidianEntityValue(masa, STB_ENTITY, "terlapor");
+  const obsidianUnreportedTotal = () => CONTROL_OMZET_MONTHS.reduce((sum, masa) => sum + obsidianUnreportedValue(masa), 0);
+  const remainingValue = (group: string, entity: string, key: "omzet" | "terlapor") => ANNUAL_OMZET_LIMIT - totalValue(group, entity, key);
+  const isObsidianUnreported = (group: string, entity: string) => group === OBSIDIAN_GROUP && entity === OBSIDIAN_UNREPORTED_ENTITY;
   const update = (key: keyof Filters, value: string) => setFilters((current) => ({ ...current, [key]: value, ...(key === "group" ? { entity: ALL } : {}) }));
 
   function saveManualInput() {
@@ -102,23 +111,32 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
             <thead className="sticky top-0 z-20">
               <tr>
                 <th rowSpan={3} className="sticky left-0 z-40 min-w-24 border-b border-r border-slate-300 bg-slate-900 px-4 py-3 text-left text-sm font-extrabold text-white shadow-[2px_0_0_#cbd5e1]">Masa</th>
-                {visibleGroups.map((group) => <th key={group.name} colSpan={group.entities.length * 2} className={`border-b border-r border-white/30 px-3 py-3 text-center text-sm font-extrabold tracking-wide ${GROUP_COLORS[group.name].group}`}>{group.name}</th>)}
+                {visibleGroups.map((group) => <th key={group.name} colSpan={group.entities.reduce((columns, entity) => columns + (isObsidianUnreported(group.name, entity) ? 1 : 2), 0)} className={`border-b border-r border-white/30 px-3 py-3 text-center text-sm font-extrabold tracking-wide ${GROUP_COLORS[group.name].group}`}>{group.name}</th>)}
               </tr>
-              <tr>{visibleGroups.flatMap((group) => group.entities.map((entity) => <th key={`${group.name}-${entity}`} colSpan={2} className={`min-w-52 border-b border-r border-slate-300 px-3 py-3 text-center font-bold ${GROUP_COLORS[group.name].entity}`}>{entity}</th>))}</tr>
-              <tr>{visibleGroups.flatMap((group) => group.entities.flatMap((entity) => ([<th key={`${entity}-omzet`} className={`min-w-32 border-b border-r border-slate-300 px-3 py-2 text-right font-bold ${GROUP_COLORS[group.name].sub}`}>Omset</th>, <th key={`${entity}-terlapor`} className={`min-w-32 border-b border-r border-slate-300 px-3 py-2 text-right font-bold ${GROUP_COLORS[group.name].sub}`}>Terlapor</th>])))}</tr>
+              <tr>{visibleGroups.flatMap((group) => group.entities.map((entity) => <th key={`${group.name}-${entity}`} colSpan={isObsidianUnreported(group.name, entity) ? 1 : 2} rowSpan={isObsidianUnreported(group.name, entity) ? 2 : 1} className={`min-w-52 border-b border-r border-slate-300 px-3 py-3 text-center font-bold ${GROUP_COLORS[group.name].entity}`}>{entity}</th>))}</tr>
+              <tr>{visibleGroups.flatMap((group) => group.entities.flatMap((entity) => isObsidianUnreported(group.name, entity) ? [] : ([<th key={`${entity}-omzet`} className={`min-w-32 border-b border-r border-slate-300 px-3 py-2 text-right font-bold ${GROUP_COLORS[group.name].sub}`}>Omset</th>, <th key={`${entity}-terlapor`} className={`min-w-32 border-b border-r border-slate-300 px-3 py-2 text-right font-bold ${GROUP_COLORS[group.name].sub}`}>Terlapor</th>])))}</tr>
             </thead>
             <tbody>
               {visibleMonths.map((masa, index) => <tr key={masa} className={index % 2 ? "bg-slate-50" : "bg-white"}>
                 <th className="sticky left-0 z-10 border-b border-r border-slate-300 bg-inherit px-4 py-3 text-left font-bold text-slate-800 shadow-[2px_0_0_#e2e8f0]">{MONTH_LABELS[CONTROL_OMZET_MONTHS.indexOf(masa)]} {String(selectedYear).slice(-2)}</th>
-                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => (["omzet", "terlapor"] as const).map((key) => <td key={`${masa}-${entity}-${key}`} className="border-b border-r border-slate-200 px-3 py-3 text-right tabular-nums">{number(cellValue(masa, group.name, entity, key))}</td>)))}
+                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => isObsidianUnreported(group.name, entity) ? [<td key={`${masa}-${entity}`} className="border-b border-r border-slate-200 px-3 py-3 text-right tabular-nums">{number(obsidianUnreportedValue(masa))}</td>] : (["omzet", "terlapor"] as const).map((key) => <td key={`${masa}-${entity}-${key}`} className="border-b border-r border-slate-200 px-3 py-3 text-right tabular-nums">{number(cellValue(masa, group.name, entity, key))}</td>)))}
               </tr>)}
               <tr className="bg-slate-800 font-extrabold text-white">
                 <th className="sticky left-0 z-10 border-r border-slate-600 bg-slate-900 px-4 py-3 text-left shadow-[2px_0_0_#475569]">Total</th>
-                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => (["omzet", "terlapor"] as const).map((key) => <td key={`total-${entity}-${key}`} className="border-r border-slate-600 px-3 py-3 text-right tabular-nums">{number(totalValue(group.name, entity, key))}</td>)))}
+                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => isObsidianUnreported(group.name, entity) ? [<td key={`total-${entity}`} className="border-r border-slate-600 px-3 py-3 text-right tabular-nums">{number(obsidianUnreportedTotal())}</td>] : (["omzet", "terlapor"] as const).map((key) => <td key={`total-${entity}-${key}`} className="border-r border-slate-600 px-3 py-3 text-right tabular-nums">{number(totalValue(group.name, entity, key))}</td>)))}
               </tr>
               <tr className="bg-amber-50 font-semibold italic text-amber-950">
                 <th className="sticky left-0 z-10 border-r border-t border-amber-200 bg-amber-100 px-4 py-3 text-left shadow-[2px_0_0_#fde68a]">Sisa</th>
-                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => (["omzet", "terlapor"] as const).map((key) => <td key={`sisa-${entity}-${key}`} className="border-r border-t border-amber-200 px-3 py-3 text-right tabular-nums">{number(remainingValue(group.name, entity, key))}</td>)))}
+                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => {
+                  if (isObsidianUnreported(group.name, entity)) {
+                    const remaining = ANNUAL_OMZET_LIMIT - obsidianUnreportedTotal();
+                    return [<td key={`sisa-${entity}`} className={`border-r border-t px-3 py-3 text-right tabular-nums ${remaining < 0 ? "border-red-200 bg-red-100 font-bold not-italic text-red-700" : "border-amber-200"}`}>{number(remaining)}</td>];
+                  }
+                  return (["omzet", "terlapor"] as const).map((key) => {
+                    const remaining = remainingValue(group.name, entity, key);
+                    return <td key={`sisa-${entity}-${key}`} className={`border-r border-t px-3 py-3 text-right tabular-nums ${remaining < 0 ? "border-red-200 bg-red-100 font-bold not-italic text-red-700" : "border-amber-200"}`}>{number(remaining)}</td>;
+                  });
+                }))}
               </tr>
             </tbody>
           </table>
