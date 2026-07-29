@@ -18,6 +18,8 @@ type StructureDraft = Omit<CorporateStructure, "createdAt" | "updatedAt">;
 const profileEmpty = (): ProfileDraft => ({ id: "", companyName: "", brandGroup: "", businessField: "", establishmentDeed: "", amendmentDeed: "", operationStartDate: "", npwp: "", npwpd: "", skpkp: "", nib: "", kbli: "", kemenkumhamApproval: "", director: "", commissioner: "", shareholders: "", status: "Aktif", notes: "", source: "Manual Input" });
 const structureEmpty = (): StructureDraft => ({ id: "", parentHolding: "", brandGroup: "", entity: "", relationType: "Holding", ownershipPercentage: "", status: "Aktif", notes: "" });
 const documentEmpty = () => ({ documentName: "", category: "Akta Perusahaan", company: "", documentNumber: "", documentDate: "", expiredDate: "", notes: "" });
+const LEGAL_DOCUMENT_EXTENSIONS = new Set(["pdf", "doc", "docx", "xls", "xlsx", "jpg", "jpeg", "png"]);
+const MAX_SERVER_UPLOAD_SIZE = 4.5 * 1024 * 1024;
 const COMPANY_GROUP_ORDER = ["holding", "obsidian", "1001", "resto", "triple egg"];
 
 export function LegalDocumentDashboard({ page, verifyPassword }: { page: LegalPage; verifyPassword: VerifyPassword }) {
@@ -80,11 +82,14 @@ export function LegalDocumentDashboard({ page, verifyPassword }: { page: LegalPa
   }
   async function uploadDocument(event: FormEvent) {
     event.preventDefault(); if (!documentDraft?.documentName.trim() || !file) { setError("Nama Dokumen dan Upload File wajib diisi."); return; }
+    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+    if (!LEGAL_DOCUMENT_EXTENSIONS.has(extension)) { setError("Format file tidak didukung."); return; }
+    if (file.size > MAX_SERVER_UPLOAD_SIZE) { setError("Ukuran file terlalu besar. Maksimal 4.5 MB untuk upload server."); return; }
     const password = await verifyPassword(); if (!password) return;
     const form = new FormData(); Object.entries(documentDraft).forEach(([key, value]) => form.append(key, value)); form.append("file", file);
     setSaving(true); setError("");
-    try { const response = await fetch("/api/legal-documents", { method: "POST", headers: { "x-dashboard-password": password }, body: form }); const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.error || "Upload Document gagal."); setData(normalizeLegalData(payload.legalData)); setDocumentDraft(null); setFile(null); setNotice("Dokumen berhasil diupload dan tersimpan ke legalData."); }
-    catch (e) { setError(e instanceof Error ? e.message : "Upload Document gagal."); }
+    try { const response = await fetch("/api/legal-documents", { method: "POST", headers: { "x-dashboard-password": password }, body: form }); const payload = await response.json().catch(() => ({})); if (!response.ok) throw new Error(payload.message || payload.error || `Upload Document gagal (HTTP ${response.status}).`); setData(normalizeLegalData(payload.legalData)); setDocumentDraft(null); setFile(null); setNotice("Dokumen berhasil diupload dan tersimpan ke legalData."); }
+    catch (e) { setError(e instanceof Error ? e.message : "Upload Document gagal karena respons server tidak dapat diproses."); }
     finally { setSaving(false); }
   }
   async function remove(kind: "companyProfiles" | "corporateStructures" | "documents", id: string) {
