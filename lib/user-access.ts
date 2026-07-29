@@ -15,7 +15,7 @@ export const USER_ACCESS: readonly UserAccess[] = [
   { name: "Finance", email: "finance@company.com", password: "finance123", role: "FINANCE_USER" },
 ] as const;
 
-export type DashboardArea = "tax" | "finance";
+export type DashboardArea = "tax" | "finance" | "legal";
 
 export const AUTH_STORAGE_KEY = "authSession";
 
@@ -48,7 +48,12 @@ export function canAccessFinance(role: UserRole) {
   return role === "OWNER" || role === "SUPER_ADMIN" || role === "FINANCE_USER";
 }
 
+export function canAccessLegal(role: UserRole) {
+  return role === "OWNER" || role === "SUPER_ADMIN";
+}
+
 export function canAccessArea(role: UserRole, area: DashboardArea) {
+  if (area === "legal") return canAccessLegal(role);
   return area === "tax" ? canAccessTax(role) : canAccessFinance(role);
 }
 
@@ -58,5 +63,6 @@ const FINANCE_PAGES = new Set([
 ]);
 
 export function canAccessPage(role: UserRole, page: string) {
+  if (page.startsWith("legal")) return canAccessLegal(role);
   return FINANCE_PAGES.has(page) ? canAccessFinance(role) : canAccessTax(role);
 }
