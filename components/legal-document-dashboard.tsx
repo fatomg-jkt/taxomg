@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Building2, Cloud, Download, Edit3, Eye, FileSpreadsheet, FileText, Plus, Trash2, Upload, X } from "lucide-react";
+import { Building2, Cloud, Download, Edit3, FileSpreadsheet, FileText, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +18,7 @@ type StructureDraft = Omit<CorporateStructure, "createdAt" | "updatedAt">;
 const profileEmpty = (): ProfileDraft => ({ id: "", companyName: "", brandGroup: "", businessField: "", establishmentDeed: "", amendmentDeed: "", operationStartDate: "", npwp: "", npwpd: "", skpkp: "", nib: "", kbli: "", kemenkumhamApproval: "", director: "", commissioner: "", shareholders: "", status: "Aktif", notes: "", source: "Manual Input" });
 const structureEmpty = (): StructureDraft => ({ id: "", parentHolding: "", brandGroup: "", entity: "", relationType: "Holding", ownershipPercentage: "", status: "Aktif", notes: "" });
 const documentEmpty = () => ({ documentName: "", category: "Akta Perusahaan", company: "", documentNumber: "", documentDate: "", expiredDate: "", notes: "" });
+const COMPANY_GROUP_ORDER = ["holding", "obsidian", "1001", "resto", "triple egg"];
 
 export function LegalDocumentDashboard({ page, verifyPassword }: { page: LegalPage; verifyPassword: VerifyPassword }) {
   const [data, setData] = useState<LegalData>(EMPTY_LEGAL_DATA);
@@ -111,13 +112,73 @@ const Empty = ({ text }: { text: string }) => <div className="grid min-h-44 plac
 const Actions = ({ edit, remove }: { edit?: () => void; remove: () => void }) => <div className="flex gap-1">{edit && <Button variant="ghost" size="icon" onClick={edit} aria-label="Edit"><Edit3 className="h-4 w-4" /></Button>}<Button variant="ghost" size="icon" onClick={remove} aria-label="Hapus" className="text-red-600"><Trash2 className="h-4 w-4" /></Button></div>;
 
 function CompanyContent({ rows, onEdit, onDelete }: { rows: CompanyProfile[]; onEdit: (v: ProfileDraft) => void; onDelete: (id:string)=>void }) {
-  const [detail, setDetail] = useState<CompanyProfile | null>(null);
-  return <><div className="grid gap-4 sm:grid-cols-3"><Summary icon={Building2} label="Total Perusahaan" value={rows.length}/><Summary icon={Building2} label="Perusahaan Aktif" value={rows.filter(r=>r.status==="Aktif").length}/><Summary icon={FileText} label="Perlu Update" value={rows.filter(r=>r.status==="Perlu Update").length}/></div><DataCard title="Daftar Perusahaan">{!rows.length ? <Empty text="Belum ada Company Profile. Upload Excel atau klik Tambah Company Profile untuk mulai."/> : <Table><TableHeader><TableRow>{["Nama Perusahaan","Brand / Group","Bidang Bisnis","NPWP","NIB","Status","Keterangan","Aksi"].map(h=><TableHead key={h} className="whitespace-nowrap">{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(r=><TableRow key={r.id}><TableCell className="min-w-56 font-bold">{r.companyName}</TableCell><TableCell>{r.brandGroup||"-"}</TableCell><TableCell className="min-w-56">{r.businessField||"-"}</TableCell><TableCell className="whitespace-pre-line">{r.npwp||"-"}</TableCell><TableCell className="whitespace-pre-line">{r.nib||"-"}</TableCell><TableCell><StatusBadge value={r.status}/></TableCell><TableCell className="min-w-48">{r.notes||"-"}</TableCell><TableCell><div className="flex gap-1"><Button variant="ghost" size="icon" onClick={()=>setDetail(r)} aria-label="Lihat Detail"><Eye className="h-4 w-4"/></Button><Actions edit={()=>onEdit(r)} remove={()=>onDelete(r.id)}/></div></TableCell></TableRow>)}</TableBody></Table>}</DataCard>{detail && <CompanyDetail value={detail} onClose={()=>setDetail(null)}/>}</>;
-}
+  const [query, setQuery] = useState("");
+  const visibleRows = useMemo(() => {
+    const keyword = query.trim().toLocaleLowerCase("id-ID");
+    return rows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => !keyword || `${row.companyName} ${row.brandGroup}`.toLocaleLowerCase("id-ID").includes(keyword))
+      .sort((a, b) => {
+        const rank = (group: string) => {
+          const normalized = group.toLocaleLowerCase("id-ID");
+          const found = COMPANY_GROUP_ORDER.findIndex((name) => normalized.includes(name));
+          return found === -1 ? COMPANY_GROUP_ORDER.length : found;
+        };
+        return rank(a.row.brandGroup) - rank(b.row.brandGroup) || a.index - b.index;
+      })
+      .map(({ row }) => row);
+  }, [query, rows]);
+  const fields: Array<{ label: string; key: keyof CompanyProfile }> = [
+    { label: "Grup", key: "brandGroup" },
+    { label: "Bisnis", key: "businessField" },
+    { label: "Akta Pendirian", key: "establishmentDeed" },
+    { label: "Akta Perubahan", key: "amendmentDeed" },
+    { label: "Tanggal Mulai Beroperasi", key: "operationStartDate" },
+    { label: "NPWP", key: "npwp" },
+    { label: "NPWPD", key: "npwpd" },
+    { label: "SKPKP", key: "skpkp" },
+    { label: "NIB", key: "nib" },
+    { label: "KBLI sesuai NIB", key: "kbli" },
+    { label: "Pengesahan Kemenkumham", key: "kemenkumhamApproval" },
+  ];
+  const managementFields: Array<{ label: string; key: keyof CompanyProfile }> = [
+    { label: "Direktur", key: "director" },
+    { label: "Komisaris", key: "commissioner" },
+    { label: "Pemegang Saham", key: "shareholders" },
+  ];
+  const display = (value: CompanyProfile[keyof CompanyProfile]) => typeof value === "string" && value.trim() ? value : "-";
 
-function CompanyDetail({ value, onClose }: { value: CompanyProfile; onClose: () => void }) {
-  const fields = [["Akta Pendirian",value.establishmentDeed],["Akta Perubahan",value.amendmentDeed],["Tanggal Mulai Beroperasi",value.operationStartDate],["NPWPD",value.npwpd],["SKPKP",value.skpkp],["KBLI",value.kbli],["Pengesahan Kemenkumham",value.kemenkumhamApproval],["Direktur",value.director],["Komisaris",value.commissioner],["Pemegang Saham",value.shareholders]];
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/50 p-4"><div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl bg-white shadow-2xl"><div className="sticky top-0 flex items-center justify-between border-b bg-white p-5"><div><h2 className="text-xl font-black">{value.companyName}</h2><p className="text-sm font-semibold text-slate-500">Detail Company Profile</p></div><Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5"/></Button></div><dl className="grid gap-4 p-5 sm:grid-cols-2">{fields.map(([name,content])=><div key={name} className={name==="Pemegang Saham"?"sm:col-span-2":""}><dt className="text-sm font-bold text-slate-500">{name}</dt><dd className="mt-1 whitespace-pre-line font-semibold text-slate-800">{content||"-"}</dd></div>)}</dl></div></div>;
+  return <>
+    <div className="grid gap-4 sm:grid-cols-3"><Summary icon={Building2} label="Total Perusahaan" value={rows.length}/><Summary icon={Building2} label="Perusahaan Aktif" value={rows.filter(r=>r.status==="Aktif").length}/><Summary icon={FileText} label="Perlu Update" value={rows.filter(r=>r.status==="Perlu Update").length}/></div>
+    <Card className="overflow-hidden rounded-3xl">
+      <CardHeader className="gap-4 border-b border-slate-200 sm:flex-row sm:items-center sm:justify-between">
+        <div><CardTitle>Tabel Legalitas Perusahaan</CardTitle><p className="mt-1 text-sm font-medium text-slate-500">Geser tabel ke kanan untuk melihat perusahaan lainnya.</p></div>
+        <div className="relative w-full sm:w-80"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Cari perusahaan atau grup..." className="rounded-xl pl-9" aria-label="Cari perusahaan atau grup"/></div>
+      </CardHeader>
+      <CardContent className="p-0">
+        {!rows.length ? <div className="p-6"><Empty text="Belum ada Company Profile. Upload Excel atau klik Tambah Company Profile untuk mulai."/></div> : !visibleRows.length ? <div className="p-6"><Empty text="Perusahaan atau grup tidak ditemukan."/></div> :
+        <div className="max-w-full overflow-x-auto">
+          <table className="w-max min-w-full border-separate border-spacing-0 text-sm">
+            <thead><tr>
+              <th className="sticky left-0 top-0 z-30 min-w-56 border-b border-r border-blue-950 bg-blue-950 px-5 py-4 text-left text-base font-black text-white">Legalitas</th>
+              {visibleRows.map((row)=><th key={row.id} className="sticky top-0 z-20 min-w-64 max-w-72 border-b border-r border-blue-300 bg-blue-100 px-4 py-3 text-left align-top text-blue-950"><span className="block min-h-10 text-base font-black leading-snug">{display(row.companyName)}</span><span className="mt-2 flex gap-1"><Button variant="ghost" size="icon" onClick={()=>onEdit(row)} aria-label={`Edit ${row.companyName}`} className="h-8 w-8 hover:bg-blue-200"><Edit3 className="h-4 w-4"/></Button><Button variant="ghost" size="icon" onClick={()=>onDelete(row.id)} aria-label={`Hapus ${row.companyName}`} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4"/></Button></span></th>)}
+            </tr></thead>
+            <tbody>
+              {fields.map((field)=><tr key={field.key} className="group">
+                <th scope="row" className="sticky left-0 z-10 min-w-56 border-b border-r border-slate-300 bg-slate-50 px-5 py-4 text-left font-bold text-slate-800 group-hover:bg-blue-50">{field.label}</th>
+                {visibleRows.map((row)=><td key={row.id} className="min-w-64 max-w-72 whitespace-pre-wrap break-words border-b border-r border-slate-300 bg-white px-4 py-4 align-top font-medium leading-relaxed text-slate-700 group-hover:bg-slate-50">{display(row[field.key])}</td>)}
+              </tr>)}
+              <tr><th scope="row" className="sticky left-0 z-10 border-b border-r border-blue-950 bg-blue-950 px-5 py-4 text-left text-base font-black text-white">Direksi &amp; Komisaris</th><td colSpan={visibleRows.length} className="border-b border-blue-950 bg-blue-950"/></tr>
+              {managementFields.map((field)=><tr key={field.key} className="group">
+                <th scope="row" className="sticky left-0 z-10 min-w-56 border-b border-r border-slate-300 bg-slate-50 px-5 py-4 text-left font-bold text-slate-800 group-hover:bg-blue-50">{field.label}</th>
+                {visibleRows.map((row)=><td key={row.id} className="min-w-64 max-w-72 whitespace-pre-wrap break-words border-b border-r border-slate-300 bg-white px-4 py-4 align-top font-medium leading-relaxed text-slate-700 group-hover:bg-slate-50">{display(row[field.key])}</td>)}
+              </tr>)}
+            </tbody>
+          </table>
+        </div>}
+      </CardContent>
+    </Card>
+  </>;
 }
 function StructureContent({ rows, onEdit, onDelete }: { rows: CorporateStructure[]; onEdit:(v:StructureDraft)=>void; onDelete:(id:string)=>void }) { const groups=useMemo(()=>Array.from(new Set(rows.map(r=>r.parentHolding||r.brandGroup).filter(Boolean))),[rows]); return <><Card className="rounded-3xl"><CardHeader><CardTitle>Struktur Perusahaan</CardTitle></CardHeader><CardContent>{!rows.length?<Empty text="Belum ada struktur perusahaan."/>:<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{groups.map(group=><div key={group} className="rounded-2xl border border-blue-100 bg-blue-50 p-4"><p className="font-black text-blue-950">{group}</p>{rows.filter(r=>(r.parentHolding||r.brandGroup)===group).map(r=><p key={r.id} className="mt-2 text-sm font-semibold text-slate-600">↳ {r.entity} · {r.relationType}</p>)}</div>)}</div>}</CardContent></Card><DataCard title="Tabel Struktur Corporate">{!rows.length?<Empty text="Belum ada Corporate Structure. Klik Tambah Corporate Structure untuk mulai."/>:<Table><TableHeader><TableRow>{["Parent / Holding","Brand / Group","Entity / Perusahaan","Jenis Relasi","Persentase Kepemilikan","Status","Keterangan","Aksi"].map(h=><TableHead key={h} className="whitespace-nowrap">{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map(r=><TableRow key={r.id}><TableCell>{r.parentHolding||"-"}</TableCell><TableCell>{r.brandGroup||"-"}</TableCell><TableCell className="font-bold">{r.entity}</TableCell><TableCell>{r.relationType}</TableCell><TableCell>{r.ownershipPercentage ? `${r.ownershipPercentage}%` : "-"}</TableCell><TableCell><StatusBadge value={r.status}/></TableCell><TableCell>{r.notes||"-"}</TableCell><TableCell><Actions edit={()=>onEdit(r)} remove={()=>onDelete(r.id)}/></TableCell></TableRow>)}</TableBody></Table>}</DataCard></>; }
 function formatDate(value:string){ if(!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "-"; const [y,m,d]=value.split("-"); return `${d}/${m}/${y}`; }
