@@ -1,9 +1,9 @@
 import { get } from "@vercel/blob";
 import { NextResponse } from "next/server";
-import { legalBlobOptions, readLegalData } from "../../legal-data/shared";
+import { blobNotConfiguredMessage, hasLegalBlobConfiguration, legalBlobOptions, readLegalData } from "../../legal-data/shared";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!process.env.TAXOMG_STORE_ID) return NextResponse.json({ error: "Missing TAXOMG_STORE_ID" }, { status: 500 });
+  if (!hasLegalBlobConfiguration()) return NextResponse.json({ error: blobNotConfiguredMessage, message: blobNotConfiguredMessage }, { status: 500 });
   const { id } = await params;
   const document = (await readLegalData()).documents.find((item) => item.id === id);
   if (!document?.pathname) return NextResponse.json({ error: "Dokumen tidak ditemukan." }, { status: 404 });

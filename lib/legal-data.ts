@@ -15,7 +15,7 @@ export type CompanyProfile = {
   businessType?: string; address?: string;
 };
 export type CorporateStructure = { id: string; parentHolding: string; brandGroup: string; entity: string; relationType: string; ownershipPercentage: string; status: string; notes: string; createdAt: string; updatedAt: string };
-export type LegalDocument = { id: string; documentName: string; category: string; company: string; documentNumber: string; documentDate: string; expiredDate: string; status: string; fileName: string; fileUrl: string; fileType: string; pathname?: string; notes: string; source: "Upload Document"; createdAt: string; updatedAt: string };
+export type LegalDocument = { id: string; documentName: string; category: string; company: string; documentNumber: string; documentDate: string; expiredDate: string; status: string; fileName: string; fileUrl: string; fileType: string; fileSize: number; pathname?: string; notes: string; source: "Upload Document"; createdAt: string; updatedAt: string };
 export type LegalData = { companyProfiles: CompanyProfile[]; corporateStructures: CorporateStructure[]; documents: LegalDocument[]; lastUpdated: string };
 
 export const EMPTY_LEGAL_DATA: LegalData = { companyProfiles: [], corporateStructures: [], documents: [], lastUpdated: "" };
@@ -35,6 +35,7 @@ export function normalizeLegalData(value: Partial<LegalData> | null | undefined)
     corporateStructures: Array.isArray(value?.corporateStructures) ? value.corporateStructures : [],
     documents: Array.isArray(value?.documents) ? value.documents.map((document) => ({
       ...document,
+      fileSize: typeof document.fileSize === "number" ? document.fileSize : 0,
       status: ["Aktif", "Expired", "Akan Expired"].includes(document.status) ? automaticDocumentStatus(document.expiredDate) : document.status || automaticDocumentStatus(document.expiredDate),
     })) : [],
     lastUpdated: typeof value?.lastUpdated === "string" ? value.lastUpdated : "",
