@@ -3,7 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { parsePageTaxWorkbook, type TaxRecord, type UploadTaxPage } from "@/src/lib/parseTaxWorkbook";
-import { Building2, CheckCircle2, Download, Edit3, Eye, FileArchive, FileSpreadsheet, Home, Landmark, LogOut, Menu, Plus, Receipt, ShieldCheck, ShieldX, TrendingDown, TrendingUp, Trash2, Upload, WalletCards, X } from "lucide-react";
+import { Building2, CheckCircle2, Download, Edit3, Eye, FileArchive, FileSpreadsheet, Gavel, Home, Landmark, LogOut, Menu, Plus, Receipt, ShieldCheck, ShieldX, TrendingDown, TrendingUp, Trash2, Upload, WalletCards, X } from "lucide-react";
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { canAccessArea, type UserRole } from "@/lib/user-access";
 import { ControlOmzetDashboard } from "@/components/control-omzet-dashboard";
 import type { ControlOmzetRow } from "@/lib/control-omzet";
 import { CashflowDashboard, type CashflowPage } from "@/components/cashflow-dashboard";
+import { LegalDocumentDashboard, type LegalPage } from "@/components/legal-document-dashboard";
 
 const FILTER_STORAGE_KEY = "tax-dashboard-filters-v1";
 const DEFAULT_DASHBOARD_YEAR = "2026";
@@ -33,7 +34,7 @@ const PROFESSIONAL_FONT_STACK = "Inter, 'Plus Jakarta Sans', Manrope, ui-sans-se
 
 type TaxType = (typeof TAX_TYPES)[number];
 type Status = (typeof STATUSES)[number];
-type Page = "dashboard" | "ppn" | "pph21" | "unifikasi" | "pb1" | "umkm" | "documents" | "controlOmzet" | "financeOverview" | "financeDetails" | "financeDevices" | "financeObsidian" | "finance1001" | "financeResto" | CashflowPage;
+type Page = "dashboard" | "ppn" | "pph21" | "unifikasi" | "pb1" | "umkm" | "documents" | "controlOmzet" | "financeOverview" | "financeDetails" | "financeDevices" | "financeObsidian" | "finance1001" | "financeResto" | CashflowPage | LegalPage;
 type ParseResult = { records: TaxTransaction[]; errors: string[]; sheetsRead: string[] };
 
 type TaxTransaction = {
@@ -88,6 +89,9 @@ const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[
   cashflow: { title: "Cashflow", subtitle: "Monitoring proyeksi, realisasi, sisa budget, dan analisis over budget." },
   cashflowProjection: { title: "Cashflow · Proyeksi", subtitle: "Input dan pengelolaan data proyeksi cashflow." },
   cashflowActual: { title: "Cashflow · Realisasi", subtitle: "Input dan pengelolaan data realisasi pengeluaran dan pemasukan." },
+  legalCompany: { title: "Company Profile", subtitle: "Informasi profil perusahaan dan dokumen pendukung legalitas." },
+  legalStructure: { title: "Corporate Structure", subtitle: "Struktur perusahaan, brand, entity, dan relasi kepemilikan." },
+  legalDocuments: { title: "Document", subtitle: "Upload dan arsip dokumen legal perusahaan." },
 };
 
 const taxNavItems = [
@@ -98,6 +102,8 @@ const financeNavItems = [
 ] as const;
 const cashflowPages: CashflowPage[] = ["cashflow", "cashflowProjection", "cashflowActual"];
 function isCashflowPage(page: Page): page is CashflowPage { return cashflowPages.includes(page as CashflowPage); }
+const legalPages: LegalPage[] = ["legalCompany", "legalStructure", "legalDocuments"];
+function isLegalPage(page: Page): page is LegalPage { return legalPages.includes(page as LegalPage); }
 
 function clean(value: unknown) { return String(value ?? "").trim(); }
 function numberValue(value: unknown) {
@@ -493,7 +499,7 @@ export function TaxCoordinatorDashboard({ user, onLogout }: { user: { email: str
       const requestedPage = new URLSearchParams(window.location.search).get("page");
       if (!requestedPage || !(requestedPage in pageMeta)) return;
       const requested = requestedPage as Page;
-      const allowed = canAccessArea(user.role, isFinanceAreaPage(requested) ? "finance" : "tax");
+      const allowed = canAccessArea(user.role, isLegalPage(requested) ? "legal" : isFinanceAreaPage(requested) ? "finance" : "tax");
       setAccessDenied(!allowed);
       if (allowed) setPage(requested);
     };
@@ -522,7 +528,7 @@ export function TaxCoordinatorDashboard({ user, onLogout }: { user: { email: str
   const financeOptions = { group: Array.from(new Set(financeAccounts.map((r) => r.group))).filter(Boolean).sort() };
 
   function navigateToPage(nextPage: Page) {
-    const allowed = canAccessArea(user.role, isFinanceAreaPage(nextPage) ? "finance" : "tax");
+    const allowed = canAccessArea(user.role, isLegalPage(nextPage) ? "legal" : isFinanceAreaPage(nextPage) ? "finance" : "tax");
     setAccessDenied(!allowed);
     const url = new URL(window.location.href);
     url.searchParams.set("page", nextPage);
@@ -573,7 +579,7 @@ export function TaxCoordinatorDashboard({ user, onLogout }: { user: { email: str
     <Sidebar page={page} setPage={navigateToPage} open={drawerOpen} setOpen={setDrawerOpen} user={user} onLogout={onLogout} />
     <div className="min-h-screen lg:pl-72">
       <header className="sticky top-0 z-20 border-b border-[#D8E0EA] bg-[#EEF3F8]/90 px-4 py-3 backdrop-blur lg:hidden"><Button variant="outline" onClick={() => setDrawerOpen(true)}><Menu className="h-4 w-4" /> Menu</Button></header>
-      {accessDenied ? <AccessDenied onBack={() => navigateToPage(user.role === "FINANCE_USER" ? "financeOverview" : "dashboard")} /> : <section className="space-y-6 p-4 sm:p-6 xl:p-8">
+      {accessDenied ? <AccessDenied onBack={() => navigateToPage(user.role === "FINANCE_USER" ? "financeOverview" : "dashboard")} /> : isLegalPage(page) ? <LegalDocumentDashboard page={page} verifyPassword={verifyPassword} /> : <section className="space-y-6 p-4 sm:p-6 xl:p-8">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"><div><h1 className="text-3xl font-black tracking-tight sm:text-4xl">{meta.title}</h1>{meta.subtitle && <p className="mt-2 text-base font-medium text-slate-600">{meta.subtitle}</p>}</div>{isManualPage(page) && page !== "dashboard" && page !== "controlOmzet" && <Button onClick={() => openManual()} className="rounded-2xl bg-blue-600 font-bold hover:bg-blue-700"><Plus className="h-4 w-4" /> {manualButtonLabel(page)}</Button>}</div>
         {page === "controlOmzet" || isCashflowPage(page) ? null : isFinancePage(page) ? <FinanceActionBar filters={financeFilters} setFilters={setFinanceFilters} options={financeOptions} activeTab={financeTabFromPage(page)} setPage={navigateToPage} onQuickUpdate={() => setQuickSaldoOpen(true)} onSave={saveUpdateSaldoToCloud} saving={busy} /> : <FilterBar filters={filters} updateFilter={updateFilter} options={{ tahun: yearOptions, masaPajak: MONTH_NAMES, perusahaan: options("perusahaan"), jenisPajak: page === "dashboard" ? DASHBOARD_FILTER_TAX_TYPES : TAX_TYPES.filter((type) => !meta.types || meta.types.includes(type)), status: FILTER_STATUSES }} onUpload={() => inputRef.current?.click()} onManual={() => openManual()} onSave={saveToCloud} saving={busy} showDataEntryActions={page !== "dashboard" && page !== "documents" && !isFinanceAreaPage(page)} showStatusAndSearch={page !== "documents" && page !== "dashboard" && !isFinanceAreaPage(page)} />}
         <Input ref={inputRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden" />
@@ -628,9 +634,10 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
 function Sidebar({ page, setPage, open, setOpen, user, onLogout }: { page: Page; setPage: (page: Page) => void; open: boolean; setOpen: (open: boolean) => void; user: { email: string; role: UserRole }; onLogout: () => void }) {
   const renderItems = (items: typeof taxNavItems | typeof financeNavItems) => items.map(([id, Icon, label]) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-bold transition", page === id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white")}><Icon className="h-5 w-5" />{label}</button>);
   const cashflowItem = (id: CashflowPage, label: string, nested = false) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl py-2.5 text-left text-sm font-bold transition", nested ? "pl-12 pr-4 text-xs" : "px-4", page === id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white")}>{!nested && <TrendingDown className="h-5 w-5" />}{label}</button>;
+  const legalItem = (id: LegalPage, label: string) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl py-2.5 pl-12 pr-4 text-left text-xs font-bold transition", page === id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white")}>{label}</button>;
   return <aside className={cn("fixed inset-y-0 left-0 z-40 w-72 transform overflow-y-auto bg-[#020617] p-5 text-white shadow-2xl transition-transform lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
     <div className="mb-8 flex items-center justify-between"><div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30"><Receipt className="h-6 w-6" /></div><div><p className="text-lg font-black">Tax Coordinator</p><p className="text-xs font-semibold text-slate-400">Tax & Finance Dashboard</p></div></div><Button variant="ghost" size="icon" className="text-white lg:hidden" onClick={() => setOpen(false)}><X className="h-5 w-5" /></Button></div>
-    <nav className="space-y-6">{canAccessArea(user.role, "tax") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Tax</p><div className="space-y-2">{renderItems(taxNavItems)}</div></div>}{canAccessArea(user.role, "finance") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Finance</p><div className="space-y-2">{renderItems(financeNavItems)}<div>{cashflowItem("cashflow", "Cashflow")}{cashflowItem("cashflowProjection", "Proyeksi", true)}{cashflowItem("cashflowActual", "Realisasi", true)}</div></div></div>}</nav>
+    <nav className="space-y-6">{canAccessArea(user.role, "tax") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Tax</p><div className="space-y-2">{renderItems(taxNavItems)}</div></div>}{canAccessArea(user.role, "finance") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Dashboard Finance</p><div className="space-y-2">{renderItems(financeNavItems)}<div>{cashflowItem("cashflow", "Cashflow")}{cashflowItem("cashflowProjection", "Proyeksi", true)}{cashflowItem("cashflowActual", "Realisasi", true)}</div></div></div>}{canAccessArea(user.role, "legal") && <div><p className="mb-2 px-4 text-xs font-black uppercase tracking-[0.2em] text-slate-500">Legal</p><div className="space-y-1"><div className="flex items-center gap-3 px-4 py-2 text-sm font-bold text-slate-300"><Gavel className="h-5 w-5" />Legal Document</div>{legalItem("legalCompany", "Company Profile")}{legalItem("legalStructure", "Corporate Structure")}{legalItem("legalDocuments", "Document")}</div></div>}</nav>
     <div className="mt-8 border-t border-white/10 pt-5"><p className="truncate px-4 text-sm font-bold text-white">{user.email}</p><p className="mt-1 px-4 text-xs font-semibold text-slate-400">{user.role.replaceAll("_", " ")}</p><Button onClick={onLogout} variant="ghost" className="mt-3 w-full justify-start rounded-2xl px-4 font-bold text-slate-300 hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" /> Logout</Button></div>
   </aside>;
 }
