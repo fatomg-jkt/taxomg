@@ -90,7 +90,6 @@ const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[
   cashflowProjection: { title: "Cashflow · Proyeksi", subtitle: "Input dan pengelolaan data proyeksi cashflow." },
   cashflowActual: { title: "Cashflow · Realisasi", subtitle: "Input dan pengelolaan data realisasi pengeluaran dan pemasukan." },
   legalCompany: { title: "Company Profile", subtitle: "Informasi profil perusahaan dan dokumen pendukung legalitas." },
-  legalStructure: { title: "Corporate Structure", subtitle: "Struktur perusahaan, brand, entity, dan relasi kepemilikan." },
   legalDocuments: { title: "Document", subtitle: "Upload dan arsip dokumen legal perusahaan." },
 };
 
@@ -102,7 +101,7 @@ const financeNavItems = [
 ] as const;
 const cashflowPages: CashflowPage[] = ["cashflow", "cashflowProjection", "cashflowActual"];
 function isCashflowPage(page: Page): page is CashflowPage { return cashflowPages.includes(page as CashflowPage); }
-const legalPages: LegalPage[] = ["legalCompany", "legalStructure", "legalDocuments"];
+const legalPages: LegalPage[] = ["legalCompany", "legalDocuments"];
 function isLegalPage(page: Page): page is LegalPage { return legalPages.includes(page as LegalPage); }
 
 function clean(value: unknown) { return String(value ?? "").trim(); }
@@ -497,6 +496,14 @@ export function TaxCoordinatorDashboard({ user, onLogout }: { user: { email: str
   useEffect(() => {
     const applyUrlPage = () => {
       const requestedPage = new URLSearchParams(window.location.search).get("page");
+      if (requestedPage === "legalStructure") {
+        const url = new URL(window.location.href);
+        url.searchParams.set("page", "legalCompany");
+        window.history.replaceState(null, "", url);
+        setAccessDenied(!canAccessArea(user.role, "legal"));
+        if (canAccessArea(user.role, "legal")) setPage("legalCompany");
+        return;
+      }
       if (!requestedPage || !(requestedPage in pageMeta)) return;
       const requested = requestedPage as Page;
       const allowed = canAccessArea(user.role, isLegalPage(requested) ? "legal" : isFinanceAreaPage(requested) ? "finance" : "tax");
@@ -637,7 +644,7 @@ function Sidebar({ page, setPage, open, setOpen, user, onLogout }: { page: Page;
   const legalItem = (id: LegalPage, label: string) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center rounded-2xl py-2 pl-12 pr-4 text-left text-xs font-semibold transition", page === id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white")}>{label}</button>;
   return <aside className={cn("fixed inset-y-0 left-0 z-40 w-72 transform overflow-y-auto bg-[#020617] p-5 text-white shadow-2xl transition-transform lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
     <div className="mb-8 flex items-center justify-between"><div className="flex items-center gap-3"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30"><Receipt className="h-6 w-6" /></div><div><p className="text-lg font-extrabold">DASHBOARD</p><p className="text-xs font-medium text-slate-400">Tax, Finance &amp; Legal</p></div></div><Button variant="ghost" size="icon" className="text-white lg:hidden" onClick={() => setOpen(false)}><X className="h-5 w-5" /></Button></div>
-    <nav className="space-y-7">{canAccessArea(user.role, "tax") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Dashboard Tax</p><div className="space-y-1.5">{renderItems(taxNavItems)}</div></div>}{canAccessArea(user.role, "finance") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Dashboard Finance</p><div className="space-y-1.5">{renderItems(financeNavItems)}<div className="space-y-0.5">{cashflowItem("cashflow", "Cashflow")}{cashflowItem("cashflowProjection", "Proyeksi", true)}{cashflowItem("cashflowActual", "Realisasi", true)}</div></div></div>}{canAccessArea(user.role, "legal") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Legal</p><div className="space-y-0.5"><div className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-slate-300"><Gavel className="h-5 w-5 shrink-0" />Legal Document</div>{legalItem("legalCompany", "Company Profile")}{legalItem("legalStructure", "Corporate Structure")}{legalItem("legalDocuments", "Document")}</div></div>}</nav>
+    <nav className="space-y-7">{canAccessArea(user.role, "tax") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Dashboard Tax</p><div className="space-y-1.5">{renderItems(taxNavItems)}</div></div>}{canAccessArea(user.role, "finance") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Dashboard Finance</p><div className="space-y-1.5">{renderItems(financeNavItems)}<div className="space-y-0.5">{cashflowItem("cashflow", "Cashflow")}{cashflowItem("cashflowProjection", "Proyeksi", true)}{cashflowItem("cashflowActual", "Realisasi", true)}</div></div></div>}{canAccessArea(user.role, "legal") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Legal</p><div className="space-y-0.5"><div className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-slate-300"><Gavel className="h-5 w-5 shrink-0" />Legal Document</div>{legalItem("legalCompany", "Company Profile")}{legalItem("legalDocuments", "Document")}</div></div>}</nav>
     <div className="mt-8 border-t border-white/10 pt-5"><p className="truncate px-4 text-sm font-bold text-white">{user.email}</p><p className="mt-1 px-4 text-xs font-semibold text-slate-400">{user.role.replaceAll("_", " ")}</p><Button onClick={onLogout} variant="ghost" className="mt-3 w-full justify-start rounded-2xl px-4 font-bold text-slate-300 hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" /> Logout</Button></div>
   </aside>;
 }
