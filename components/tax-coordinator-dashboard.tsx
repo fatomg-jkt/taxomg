@@ -3,7 +3,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { parsePageTaxWorkbook, type TaxRecord, type UploadTaxPage } from "@/src/lib/parseTaxWorkbook";
-import { Building2, CheckCircle2, Download, Edit3, Eye, FileArchive, FileSpreadsheet, Gavel, Home, Landmark, LogOut, Menu, Plus, Receipt, ShieldCheck, ShieldX, TrendingDown, TrendingUp, Trash2, Upload, WalletCards, X } from "lucide-react";
+import { Building2, CheckCircle2, ChevronDown, Download, Edit3, Eye, FileArchive, FileSpreadsheet, FileText, Gavel, Home, Landmark, LogOut, Menu, Plus, Receipt, ShieldCheck, ShieldX, TrendingDown, TrendingUp, Trash2, Upload, WalletCards, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -96,13 +96,12 @@ const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[
 const taxNavItems = [
   ["dashboard", Home, "Overview"], ["ppn", Receipt, "PPN"], ["pph21", Receipt, "PPh Pasal 21"], ["unifikasi", Receipt, "PPh Unifikasi"], ["pb1", Building2, "PB1"], ["umkm", Building2, "PPh UMKM"], ["documents", FileArchive, "Dokumen Pajak"], ["controlOmzet", TrendingUp, "Control Omzet"],
 ] as const;
-const financeNavItems = [
-  ["financeOverview", WalletCards, "Overview"], ["financeDetails", Landmark, "Brand Details"], ["financeDevices", ShieldCheck, "Device Status"],
-] as const;
 const cashflowPages: CashflowPage[] = ["cashflow", "cashflowProjection", "cashflowActual"];
 function isCashflowPage(page: Page): page is CashflowPage { return cashflowPages.includes(page as CashflowPage); }
 const legalPages: LegalPage[] = ["legalCompany", "legalDocuments"];
 function isLegalPage(page: Page): page is LegalPage { return legalPages.includes(page as LegalPage); }
+const taxSubPages: Page[] = ["ppn", "pph21", "unifikasi", "pb1", "umkm", "documents"];
+const financeSubPages: Page[] = ["financeDetails", "financeDevices", "cashflowProjection", "cashflowActual"];
 
 function clean(value: unknown) { return String(value ?? "").trim(); }
 function numberValue(value: unknown) {
@@ -639,13 +638,25 @@ function AccessDenied({ onBack }: { onBack: () => void }) {
 }
 
 function Sidebar({ page, setPage, open, setOpen, user, onLogout }: { page: Page; setPage: (page: Page) => void; open: boolean; setOpen: (open: boolean) => void; user: { email: string; role: UserRole }; onLogout: () => void }) {
-  const nestedNavItems = new Set<Page>(["ppn", "pph21", "unifikasi", "pb1", "umkm", "financeDetails", "financeDevices"]);
-  const renderItems = (items: typeof taxNavItems | typeof financeNavItems) => items.map(([id, Icon, label]) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl py-2.5 pr-4 text-left text-sm font-semibold transition", nestedNavItems.has(id) ? "pl-12" : "pl-4", page === id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white")}><Icon className="h-5 w-5 shrink-0" />{label}</button>);
-  const cashflowItem = (id: CashflowPage, label: string, nested = false) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl text-left font-semibold transition", nested ? "py-2 pl-12 pr-4 text-xs" : "px-4 py-2.5 text-sm", page === id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white")}>{!nested && <TrendingDown className="h-5 w-5 shrink-0" />}{label}</button>;
-  const legalItem = (id: LegalPage, label: string) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center rounded-2xl py-2 pl-12 pr-4 text-left text-xs font-semibold transition", page === id ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-white/10 hover:text-white")}>{label}</button>;
+  const [taxExpanded, setTaxExpanded] = useState(() => taxSubPages.includes(page));
+  const [financeExpanded, setFinanceExpanded] = useState(() => financeSubPages.includes(page));
+  const [legalExpanded, setLegalExpanded] = useState(() => isLegalPage(page));
+  useEffect(() => {
+    if (taxSubPages.includes(page)) setTaxExpanded(true);
+    if (financeSubPages.includes(page)) setFinanceExpanded(true);
+    if (isLegalPage(page)) setLegalExpanded(true);
+  }, [page]);
+  const navItem = (id: Page, Icon: typeof Home, label: string, nested = false) => <button key={id} onClick={() => { setPage(id); setOpen(false); }} className={cn("flex w-full items-center gap-3 rounded-2xl py-2.5 pr-4 text-left font-semibold transition", nested ? "pl-12 text-xs" : "pl-4 text-sm", page === id ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white")}><Icon className="h-5 w-5 shrink-0" />{label}</button>;
+  const sectionToggle = (label: string, expanded: boolean, toggle: () => void) => <button type="button" onClick={toggle} aria-expanded={expanded} className="mb-3 flex w-full items-center justify-between rounded-xl px-4 py-1 text-left text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500 transition hover:bg-white/5 hover:text-slate-300"><span>{label}</span><ChevronDown className={cn("h-4 w-4 transition-transform", expanded && "rotate-180")} /></button>;
+  const cashflowItem = (id: CashflowPage, label: string, nested = false) => navItem(id, id === "cashflowProjection" ? TrendingUp : id === "cashflowActual" ? CheckCircle2 : TrendingDown, label, nested);
+  const legalItem = (id: LegalPage, label: string) => navItem(id, id === "legalCompany" ? Building2 : FileText, label, true);
   return <aside className={cn("fixed inset-y-0 left-0 z-40 w-72 transform overflow-y-auto bg-[#020617] p-5 text-white shadow-2xl transition-transform lg:translate-x-0", open ? "translate-x-0" : "-translate-x-full")}>
     <div className="mb-8 flex items-center justify-between"><div><p className="text-2xl font-extrabold">DASHBOARD</p><p className="mt-1 text-xs font-medium text-slate-400">Tax, Finance &amp; Legal</p></div><Button variant="ghost" size="icon" className="text-white lg:hidden" onClick={() => setOpen(false)}><X className="h-5 w-5" /></Button></div>
-    <nav className="space-y-7">{canAccessArea(user.role, "tax") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Dashboard Tax</p><div className="space-y-1.5">{renderItems(taxNavItems)}</div></div>}{canAccessArea(user.role, "finance") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Dashboard Finance</p><div className="space-y-1.5">{renderItems(financeNavItems)}<div className="space-y-0.5">{cashflowItem("cashflow", "Cashflow")}{cashflowItem("cashflowProjection", "Proyeksi", true)}{cashflowItem("cashflowActual", "Realisasi", true)}</div></div></div>}{canAccessArea(user.role, "legal") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Legal</p><div className="space-y-0.5"><div className="flex items-center gap-3 px-4 py-2.5 text-sm font-semibold text-slate-300"><Gavel className="h-5 w-5 shrink-0" />Legal Document</div>{legalItem("legalCompany", "Company Profile")}{legalItem("legalDocuments", "Document")}</div></div>}</nav>
+    <nav className="space-y-7">
+      {canAccessArea(user.role, "tax") && <div>{sectionToggle("Dashboard Tax", taxExpanded, () => setTaxExpanded((value) => !value))}<div className="space-y-1.5">{navItem("dashboard", Home, "Overview")}{navItem("controlOmzet", TrendingUp, "Control Omzet")}{taxExpanded && taxNavItems.filter(([id]) => taxSubPages.includes(id)).map(([id, Icon, label]) => navItem(id, Icon, label, true))}</div></div>}
+      {canAccessArea(user.role, "finance") && <div>{sectionToggle("Dashboard Finance", financeExpanded, () => setFinanceExpanded((value) => !value))}<div className="space-y-1.5">{navItem("financeOverview", WalletCards, "Overview")}{financeExpanded && <>{navItem("financeDetails", Landmark, "Brand Details", true)}{navItem("financeDevices", ShieldCheck, "Device Status", true)}</>}{cashflowItem("cashflow", "Cashflow")}{financeExpanded && <div className="space-y-0.5">{cashflowItem("cashflowProjection", "Proyeksi", true)}{cashflowItem("cashflowActual", "Realisasi", true)}</div>}</div></div>}
+      {canAccessArea(user.role, "legal") && <div><p className="mb-3 px-4 text-xs font-extrabold uppercase tracking-[0.2em] text-slate-500">Legal</p><div className="space-y-0.5"><button type="button" onClick={() => setLegalExpanded((value) => !value)} aria-expanded={legalExpanded} className="flex w-full items-center gap-3 rounded-2xl px-4 py-2.5 text-left text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"><Gavel className="h-5 w-5 shrink-0" /><span className="flex-1">Legal Document</span><ChevronDown className={cn("h-4 w-4 transition-transform", legalExpanded && "rotate-180")} /></button>{legalExpanded && <>{legalItem("legalCompany", "Company Profile")}{legalItem("legalDocuments", "Document")}</>}</div></div>}
+    </nav>
     <div className="mt-8 border-t border-white/10 pt-5"><p className="truncate px-4 text-sm font-bold text-white">{user.email}</p><p className="mt-1 px-4 text-xs font-semibold text-slate-400">{user.role.replaceAll("_", " ")}</p><Button onClick={onLogout} variant="ghost" className="mt-3 w-full justify-start rounded-2xl px-4 font-bold text-slate-300 hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" /> Logout</Button></div>
   </aside>;
 }
