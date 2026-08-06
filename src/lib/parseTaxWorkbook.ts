@@ -81,7 +81,9 @@ export function parsePageTaxWorkbook(arrayBuffer: ArrayBuffer, page: UploadTaxPa
     const umkmTax = num(value(row, "PPh UMKM"));
     const computedTax = page === "ppn" ? ppnKeluaran - ppnMasukan : page === "umkm" && !suppliedTax ? umkmTax : 0;
     const pajakTerutang = suppliedTax ? num(suppliedTax) : computedTax;
-    const suppliedPayment = clean(value(row, page === "ppn" ? "Pembayaran PPN" : "Pembayaran Pajak"));
+    const suppliedPayment = page === "ppn"
+      ? clean(value(row, "Total Pembayaran PPN")) || clean(value(row, "Pembayaran PPN")) || clean(value(row, "Payment Amount"))
+      : clean(value(row, "Pembayaran Pajak"));
     const payment = suppliedPayment ? num(suppliedPayment) : page === "ppn" && ntpnNtpd ? pajakTerutang : 0;
     return {
       id: `upload-${page}-${index + 2}-${uuid()}`, sourceSheet: firstSheetName, company, masa: period,
