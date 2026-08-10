@@ -780,11 +780,16 @@ function FinanceDashboard({ page, accounts, allAccounts, devices, setDevices, fi
   return <div className="space-y-6"><div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700 shadow-sm"><FileSpreadsheet className="mr-2 inline h-4 w-4 text-blue-600" />Data finance tersimpan sebagai financeData terpisah dari taxData. {lastSaved && <span className="ml-2 text-slate-500">Last saved: {new Date(lastSaved).toLocaleString("id-ID")}</span>}</div>{tab === "overview" ? <FinanceOverview accounts={allAccounts} /> : tab === "devices" ? <DeviceStatusTable rows={devices} setRows={setDevices} /> : <BrandDetails accounts={filtered} allAccounts={allAccounts} scopedBrand={scopedBrand} onAddAccount={onAddAccount} onUpdateAccount={onUpdateAccount} onDeleteAccount={onDeleteAccount} />}</div>;
 }
 function FinanceOverview({ accounts }: { accounts: FinanceAccount[] }) {
+  const [selectedBrand, setSelectedBrand] = useState("");
   const visibleAccounts = accounts.filter((account) => account.brand !== "Resto");
   const summary = financeSummary(visibleAccounts);
   const providers = Array.from(new Set(visibleAccounts.map((account) => account.provider).filter(Boolean)));
   const total = summary.reduce((sum, brand) => sum + brand.total, 0);
   const brandColors: Record<string, string> = { "1001": "#EC4899", "MAISON Y": "#C026D3", Obsidian: "#111827", PADEL: "#F59E0B", GOSE: "#7C3AED", BAC: "#1687D9", OMG: "#64748B", "PT GLOBAL SEHAT BERKARYA": "#334155", "TRIPLE EGG": "#10B981", WOK: "#DC2626", HUNIAN: "#FDE68A", "PT SEBELUM HINGGA SESUDAH": "#047857", Resto: "#059669" };
+  const selectedAccounts = visibleAccounts.filter((account) => account.brand === selectedBrand);
+  const groupedBalances = (key: "entity" | "provider") => Array.from(new Set(selectedAccounts.map((account) => account[key].trim()).filter(Boolean))).map((name) => ({ name, total: selectedAccounts.filter((account) => account[key] === name).reduce((sum, account) => sum + account.balance, 0), count: selectedAccounts.filter((account) => account[key] === name).length }));
+  const entityBalances = groupedBalances("entity");
+  const providerBalances = groupedBalances("provider");
   const kpis = [
     { label: "Total Saldo All Brand", value: total, money: true },
     { label: "Jumlah Brand", value: summary.length },
@@ -806,28 +811,34 @@ function FinanceOverview({ accounts }: { accounts: FinanceAccount[] }) {
     <section>
       <div className="mb-4">
         <h2 className="text-xl font-black text-slate-950">Total Saldo per Brand</h2>
-        <p className="mt-1 text-sm font-medium text-slate-500">Ringkasan otomatis dari seluruh rekening pada Brand Details.</p>
+        <p className="mt-1 text-sm font-medium text-slate-500">Klik kartu brand untuk melihat saldo per Bank/Provider dan PT/Entity.</p>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {summary.map((brand) => <Card
           key={brand.brand}
+          role="button"
+          tabIndex={0}
+          aria-expanded={selectedBrand === brand.brand}
+          onClick={() => setSelectedBrand((current) => current === brand.brand ? "" : brand.brand)}
+          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedBrand((current) => current === brand.brand ? "" : brand.brand); } }}
           style={{ backgroundColor: brandColors[brand.brand] ?? "#334155" }}
-          className="overflow-hidden rounded-3xl border-0 text-white shadow-sm"
+          className={cn("cursor-pointer overflow-hidden rounded-3xl border-0 text-white shadow-sm transition duration-200 hover:-translate-y-1 hover:shadow-xl focus:outline-none focus:ring-4 focus:ring-blue-300", selectedBrand === brand.brand && "ring-4 ring-blue-300 shadow-xl")}
         >
           <CardContent className="p-6">
-            <p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/70">Brand</p>
-            <h3 className="mt-1 text-2xl font-black">{brand.brand}</h3>
+            <div className="flex items-start justify-between gap-3"><div><p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/70">Brand</p><h3 className="mt-1 text-2xl font-black">{brand.brand}</h3></div><ChevronDown className={cn("mt-1 h-5 w-5 shrink-0 text-white/80 transition-transform", selectedBrand === brand.brand && "rotate-180")} /></div>
             <p className="mt-7 text-sm font-semibold text-white/75">Total saldo brand</p>
             <p className="mt-1 text-3xl font-black tracking-tight">{rupiah(brand.total)}</p>
-            <p className="mt-6 text-sm font-bold text-white/80">{plainNumber(brand.accountCount)} rekening / account</p>
+            <div className="mt-6 flex items-center justify-between gap-3 text-sm font-bold text-white/80"><span>{plainNumber(brand.accountCount)} rekening / account</span><span className="text-xs">Lihat detail</span></div>
           </CardContent>
         </Card>)}
       </div>
+      {selectedBrand && <Card className="mt-5 overflow-hidden rounded-3xl border-blue-200 bg-white shadow-lg"><CardHeader className="border-b border-blue-100 bg-gradient-to-r from-blue-50 to-slate-50"><div className="flex items-start justify-between gap-3"><div><CardTitle>Rincian Saldo {selectedBrand}</CardTitle><CardDescription>Saldo dikelompokkan berdasarkan PT/Entity dan Bank/Provider.</CardDescription></div><Button variant="ghost" size="icon" onClick={() => setSelectedBrand("")} aria-label="Tutup rincian saldo"><X className="h-4 w-4"/></Button></div></CardHeader><CardContent className="p-5">{selectedAccounts.length ? <div className="grid gap-5 lg:grid-cols-2"><BalanceGroup title="Saldo per PT / Entity" empty="PT / Entity belum diisi." rows={entityBalances}/><BalanceGroup title="Saldo per Bank / Provider" empty="Bank / Provider belum diisi." rows={providerBalances}/></div> : <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm font-semibold text-slate-500">Belum ada data saldo untuk brand {selectedBrand}.</div>}</CardContent></Card>}
     </section>
 
     <FinanceSummaryTable summary={summary}/>
   </div>;
 }
+function BalanceGroup({ title, empty, rows }: { title: string; empty: string; rows: { name: string; total: number; count: number }[] }) { return <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4"><h3 className="mb-3 font-black text-slate-900">{title}</h3><div className="space-y-2">{rows.length ? rows.map((row)=><div key={row.name} className="flex items-center justify-between gap-4 rounded-xl bg-white p-3 shadow-sm"><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-800">{row.name}</p><p className="text-xs font-medium text-slate-500">{plainNumber(row.count)} rekening / account</p></div><p className="shrink-0 font-black text-slate-950">{rupiah(row.total)}</p></div>) : <p className="rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm font-semibold text-slate-500">{empty}</p>}</div></div>; }
 function FinanceSummaryTable({ summary }: { summary: ReturnType<typeof financeSummary> }) { return <Card className="rounded-3xl border-[#D8E0EA] bg-white shadow-sm"><CardHeader><CardTitle>Tabel ringkasan saldo per brand</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Brand","Jumlah Group","Jumlah Entity","Jumlah Rekening/Akun","Total Saldo","Status"].map(h=><TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{summary.length ? summary.map((r)=><TableRow key={r.brand}><TableCell className="font-bold">{r.brand}</TableCell><TableCell>{plainNumber(r.groupCount)}</TableCell><TableCell>{plainNumber(r.entityCount)}</TableCell><TableCell>{plainNumber(r.accountCount)}</TableCell><TableCell className="font-bold">{rupiah(r.total)}</TableCell><TableCell><Badge variant={r.status==="Aktif"?"success":"secondary"}>{r.status}</Badge></TableCell></TableRow>) : <TableRow><TableCell colSpan={6} className="h-32 text-center text-sm font-semibold text-slate-500">Belum ada data saldo</TableCell></TableRow>}</TableBody></Table></CardContent></Card>; }
 function brandHeaderStyle(brand: string) { if (brand === "Obsidian") return { background: "#0F2147", color: "white" }; if (brand === "1001") return { background: "#EC4899", color: "white" }; if (brand === "Resto") return { background: "#10B981", color: "white" }; return undefined; }
 function BrandDetails({ accounts, allAccounts, scopedBrand, onAddAccount, onUpdateAccount, onDeleteAccount }: { accounts: FinanceAccount[]; allAccounts: FinanceAccount[]; scopedBrand: string; onAddAccount: (brand?: string, destination?: FinanceStructureItem) => void; onUpdateAccount: (id: string, patch: Partial<FinanceAccount>) => void; onDeleteAccount: (id: string) => void }) {
