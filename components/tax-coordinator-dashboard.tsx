@@ -86,7 +86,7 @@ const pageMeta: Record<Page, { title: string; subtitle: string; types?: TaxType[
   financeObsidian: { title: "Finance Obsidian", subtitle: "Detail rekening dan saldo brand Obsidian." },
   finance1001: { title: "Finance 1001", subtitle: "Detail rekening dan saldo brand 1001." },
   financeResto: { title: "Finance Resto", subtitle: "Detail rekening dan saldo brand Resto." },
-  cashflow: { title: "Cashflow", subtitle: "Monitoring proyeksi, realisasi, sisa budget, dan analisis over budget." },
+  cashflow: { title: "Cashflow", subtitle: "Monitoring proyeksi, realisasi, sisa cashflow, dan analisis over cashflow." },
   cashflowProjection: { title: "Cashflow · Proyeksi", subtitle: "Input dan pengelolaan data proyeksi cashflow." },
   cashflowActual: { title: "Cashflow · Realisasi", subtitle: "Input dan pengelolaan data realisasi pengeluaran dan pemasukan." },
   legalCompany: { title: "Company Profile", subtitle: "Informasi profil perusahaan dan dokumen pendukung legalitas." },
