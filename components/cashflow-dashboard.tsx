@@ -3,6 +3,7 @@
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import { BadgeDollarSign, Cloud, FileSpreadsheet, Percent, PiggyBank, Plus, ShieldCheck, Target, Trash2, X } from "lucide-react";
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -30,14 +31,57 @@ export function CashflowDashboard({ page, verifyPassword }: { page: CashflowPage
   return <div className="space-y-5">{notice && <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700">{notice}</div>}{page === "cashflow" ? <CashflowOverview data={data} onSave={save} saving={saving} /> : <CashflowEditor page={page} data={data} setData={setData} onSave={save} saving={saving} />}</div>;
 }
 
+function normalizedFilter(value: string) { return value.trim().toLocaleLowerCase("id-ID"); }
+function periodLabel(value: string) {
+  const text = String(value ?? "").trim();
+  const iso = text.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
+  if (iso) return `${iso[2]}-${iso[1]}`;
+  const display = text.match(/^(\d{2})[-/](\d{4})$/);
+  return display ? `${display[1]}-${display[2]}` : text;
+}
+function uniqueOptions(values: string[]) { return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "id")); }
+
+function CashflowFilter({ value, placeholder, options, onChange }: { value: string; placeholder: string; options: string[]; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const query = normalizedFilter(value);
+  const visibleOptions = options.filter((option) => !query || normalizedFilter(option).includes(query));
+  return <div className="relative min-w-40 flex-1">
+    <Input
+      value={value}
+      onChange={(event) => { onChange(event.target.value); setOpen(true); }}
+      onFocus={() => setOpen(true)}
+      onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+      placeholder={placeholder}
+      autoComplete="off"
+      className="h-11 rounded-xl bg-white pr-9"
+    />
+    <ChevronDown className={`pointer-events-none absolute right-3 top-3.5 h-4 w-4 text-slate-500 transition-transform ${open ? "rotate-180" : ""}`} />
+    {open && <div className="absolute inset-x-0 top-[calc(100%+4px)] z-50 max-h-[108px] overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-xl">
+      <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(""); setOpen(false); }} className="block h-9 w-full px-3 text-left text-sm font-semibold text-slate-600 hover:bg-blue-50">Semua</button>
+      {visibleOptions.map((option) => <button key={option} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(option); setOpen(false); }} className="block h-9 w-full truncate px-3 text-left text-sm text-slate-700 hover:bg-blue-50">{option}</button>)}
+      {!visibleOptions.length && <p className="flex h-9 items-center px-3 text-sm text-slate-400">Tidak ada saran</p>}
+    </div>}
+  </div>;
+}
+
 function CashflowOverview({ data, onSave, saving }: { data: CashflowData; onSave: () => void; saving: boolean }) {
-  const [filters, setFilters] = useState({ period: ALL, brand: ALL, week: ALL, department: ALL, type: ALL });
-  const matches = (row: CashflowEntry) => (filters.brand === ALL || row.brand === filters.brand) && (filters.week === ALL || row.week === filters.week) && (filters.department === ALL || row.department === filters.department) && (filters.type === ALL || row.type === filters.type) && (filters.period === ALL || row.date.startsWith(filters.period));
+  const [filters, setFilters] = useState({ period: "", brand: "", week: "", department: "", type: "" });
+  const allRows = [...data.projection, ...data.actual];
+  const filterOptions = {
+    period: uniqueOptions(allRows.map((row) => periodLabel(row.date))),
+    brand: uniqueOptions([...CASHFLOW_BRANDS, ...allRows.map((row) => row.brand)]),
+    week: uniqueOptions([...WEEKS, ...allRows.map((row) => row.week)]),
+    department: uniqueOptions([...CASHFLOW_DEPARTMENTS, ...allRows.map((row) => row.department)]),
+    type: uniqueOptions([...CASHFLOW_TYPES, ...allRows.map((row) => row.type)]),
+  };
+  const contains = (source: string, filter: string) => !normalizedFilter(filter) || normalizedFilter(source).includes(normalizedFilter(filter));
+  const matches = (row: CashflowEntry) => contains(row.brand, filters.brand) && contains(row.week, filters.week) && contains(row.department, filters.department) && contains(row.type, filters.type) && contains(periodLabel(row.date), filters.period);
   const projection = data.projection.filter(matches);
   const actual = data.actual.filter(matches);
   const totalProjection = projection.reduce((sum, row) => sum + safeAmount(row.nominal), 0); const totalActual = actual.reduce((sum, row) => sum + safeAmount(row.nominal), 0); const remaining = totalProjection - totalActual; const realization = percent(totalActual, totalProjection); const budgetStatus = status(totalProjection, totalActual);
-  const group = (key: "type" | "department") => Array.from(new Set([...projection.map((r) => r[key]), ...actual.map((r) => r[key])].filter(Boolean))).map((name) => { const projected = projection.filter((r) => r[key] === name).reduce((s, r) => s + safeAmount(r.nominal), 0); const realized = actual.filter((r) => r[key] === name).reduce((s, r) => s + safeAmount(r.nominal), 0); return { name, projected, realized, difference: projected - realized }; });
+  const group = (key: "type" | "department") => Array.from(new Set([...projection.map((r) => r[key]), ...actual.map((r) => r[key])].map((value) => value.trim()).filter(Boolean))).map((name) => { const projected = projection.filter((r) => normalizedFilter(r[key]) === normalizedFilter(name)).reduce((s, r) => s + safeAmount(r.nominal), 0); const realized = actual.filter((r) => normalizedFilter(r[key]) === normalizedFilter(name)).reduce((s, r) => s + safeAmount(r.nominal), 0); return { name, projected, realized, difference: projected - realized }; });
   const types = group("type"), departments = group("department");
+  const chartRows = (types.length ? types : departments).map((row) => ({ name: row.name, Proyeksi: row.projected, Realisasi: row.realized }));
   const statusAccent = budgetStatus === "Under Cashflow" ? "border-emerald-500 bg-emerald-50/60 text-emerald-700" : budgetStatus === "Over Cashflow" ? "border-red-500 bg-red-50/60 text-red-700" : "border-slate-400 bg-slate-50 text-slate-600";
   const kpis = [
     { label: "Total Proyeksi", value: rupiah(totalProjection), Icon: Target, accent: "border-blue-600 bg-blue-50/60 text-blue-700", icon: "bg-blue-100 text-blue-600" },
@@ -47,12 +91,21 @@ function CashflowOverview({ data, onSave, saving }: { data: CashflowData; onSave
     { label: "Status Cashflow", value: budgetStatus, Icon: ShieldCheck, accent: statusAccent, icon: budgetStatus === "Under Cashflow" ? "bg-emerald-100 text-emerald-600" : budgetStatus === "Over Cashflow" ? "bg-red-100 text-red-600" : "bg-slate-200 text-slate-500" },
   ];
   const summaries = [["Total Cashflow / Proyeksi", rupiah(totalProjection), "border-blue-500 bg-blue-50/60"], ["Actual Spending / Realisasi", rupiah(totalActual), "border-emerald-500 bg-emerald-50/60"], ["Cashflow Remaining / Sisa Cashflow", rupiah(remaining), "border-amber-500 bg-amber-50/60"], ["% Realisasi", `${realization.toFixed(1)}%`, "border-violet-500 bg-violet-50/60"], ["Status", budgetStatus, statusAccent]];
-  return <><Card className="rounded-3xl"><CardContent className="flex flex-wrap gap-3 p-4">{[["period", "Filter Periode", Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, "0")}`)], ["brand", "Semua Brand", CASHFLOW_BRANDS], ["week", "Semua Week", WEEKS], ["department", "Semua Departemen", CASHFLOW_DEPARTMENTS], ["type", "Semua Jenis Transaksi", CASHFLOW_TYPES]] .map(([key, label, values]) => <Select key={key as string} value={filters[key as keyof typeof filters]} onChange={(e) => setFilters({ ...filters, [key as string]: e.target.value })} className="h-11 min-w-40 flex-1 rounded-xl"><option value={ALL}>{label as string}</option>{(values as readonly string[]).map((v) => <option key={v}>{v}</option>)}</Select>)}<Button onClick={onSave} disabled={saving} variant="outline" className="h-11 rounded-xl font-bold"><Cloud className="h-4 w-4" /> {saving ? "Menyimpan..." : "Save to Cloud"}</Button></CardContent></Card>
+  const setFilter = (key: keyof typeof filters, value: string) => setFilters((current) => ({ ...current, [key]: value }));
+  return <><Card className="rounded-3xl"><CardContent className="flex flex-wrap gap-3 p-4">
+      <CashflowFilter value={filters.period} placeholder="Periode mm-yyyy" options={filterOptions.period} onChange={(value) => setFilter("period", value.replace(/[^\d-]/g, "").slice(0, 7))} />
+      <CashflowFilter value={filters.brand} placeholder="Semua Brand" options={filterOptions.brand} onChange={(value) => setFilter("brand", value)} />
+      <CashflowFilter value={filters.week} placeholder="Semua Week" options={filterOptions.week} onChange={(value) => setFilter("week", value)} />
+      <CashflowFilter value={filters.department} placeholder="Semua Departemen" options={filterOptions.department} onChange={(value) => setFilter("department", value)} />
+      <CashflowFilter value={filters.type} placeholder="Semua Jenis Transaksi" options={filterOptions.type} onChange={(value) => setFilter("type", value)} />
+      <Button onClick={onSave} disabled={saving} variant="outline" className="h-11 rounded-xl font-bold"><Cloud className="h-4 w-4" /> {saving ? "Menyimpan..." : "Save to Cloud"}</Button>
+    </CardContent></Card>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">{kpis.map(({ label, value, Icon, accent, icon }) => <Card key={label} className={`rounded-3xl border-t-4 ${accent}`}><CardContent className="p-5"><div className={`mb-4 grid h-10 w-10 place-items-center rounded-xl ${icon}`}><Icon className="h-5 w-5" /></div><p className="text-xs font-black uppercase tracking-wider text-slate-500">{label}</p><p className="mt-3 text-xl font-black text-slate-900">{label === "Status Cashflow" ? <Badge className={statusClass(value)}>{value}</Badge> : value}</p></CardContent></Card>)}</div>
     <Card className="rounded-3xl"><CardHeader><CardTitle>Ringkasan Arus Kas</CardTitle><CardDescription>Perbandingan cashflow dan actual spending sesuai filter.</CardDescription></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{summaries.map(([label,value,accent]) => <div key={label} className={`rounded-2xl border-l-4 p-4 ${accent}`}><p className="text-xs font-bold text-slate-500">{label}</p><p className="mt-2 font-black text-slate-900">{label === "Status" ? <Badge className={statusClass(value)}>{value}</Badge> : value}</p></div>)}</CardContent></Card>
+    <Card className="rounded-3xl"><CardHeader><CardTitle>Grafik Proyeksi vs Realisasi</CardTitle><CardDescription>Perbandingan nominal sesuai filter Cashflow yang aktif.</CardDescription></CardHeader><CardContent>{chartRows.length ? <div className="h-80 w-full"><ResponsiveContainer width="100%" height="100%"><BarChart data={chartRows} margin={{ top: 8, right: 16, left: 8, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="name" tick={{ fontSize: 12 }} /><YAxis tickFormatter={(value) => new Intl.NumberFormat("id-ID", { notation: "compact", maximumFractionDigits: 1 }).format(Number(value))} /><Tooltip formatter={(value) => rupiah(Number(value))} /><Legend /><Bar dataKey="Proyeksi" fill="#2563EB" radius={[6,6,0,0]} /><Bar dataKey="Realisasi" fill="#10B981" radius={[6,6,0,0]} /></BarChart></ResponsiveContainer></div> : <div className="grid h-52 place-items-center rounded-2xl border border-dashed border-slate-200 text-sm font-semibold text-slate-500">Belum ada data sesuai filter untuk ditampilkan pada grafik.</div>}</CardContent></Card>
     <Breakdown title="Detail per Jenis Biaya" heading="Jenis Biaya" rows={types} />
     <Breakdown title="Detail per Departemen" heading="Departemen" rows={departments} />
-    <Card className="rounded-3xl"><CardHeader><CardTitle>Analisis Penyebab Over Cashflow</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Departemen","Proyeksi","Realisasi","Selisih","Top Penyebab Over Cashflow"].map((h)=><TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{departments.filter((r)=>r.realized>r.projected).map((r)=><TableRow key={r.name}><TableCell className="font-bold">{r.name}</TableCell><TableCell>{rupiah(r.projected)}</TableCell><TableCell>{rupiah(r.realized)}</TableCell><TableCell className="text-red-600">{rupiah(r.difference)}</TableCell><TableCell>{actual.filter((a)=>a.department===r.name).sort((a,b)=>b.nominal-a.nominal)[0]?.description || actual.filter((a)=>a.department===r.name)[0]?.paymentItem || "-"}</TableCell></TableRow>)}{!departments.some((r)=>r.realized>r.projected)&&<EmptyRow span={5}/>}</TableBody></Table></CardContent></Card></>;
+    <Card className="rounded-3xl"><CardHeader><CardTitle>Analisis Penyebab Over Cashflow</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["Departemen","Proyeksi","Realisasi","Selisih","Top Penyebab Over Cashflow"].map((h)=><TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{departments.filter((r)=>r.realized>r.projected).map((r)=><TableRow key={r.name}><TableCell className="font-bold">{r.name}</TableCell><TableCell>{rupiah(r.projected)}</TableCell><TableCell>{rupiah(r.realized)}</TableCell><TableCell className="text-red-600">{rupiah(r.difference)}</TableCell><TableCell>{actual.filter((a)=>normalizedFilter(a.department)===normalizedFilter(r.name)).sort((a,b)=>b.nominal-a.nominal)[0]?.description || actual.filter((a)=>normalizedFilter(a.department)===normalizedFilter(r.name))[0]?.paymentItem || "-"}</TableCell></TableRow>)}{!departments.some((r)=>r.realized>r.projected)&&<EmptyRow span={5}/>}</TableBody></Table></CardContent></Card></>;
 }
 
 function Breakdown({ title, heading, rows }: { title: string; heading: string; rows: { name: string; projected: number; realized: number; difference: number }[] }) { return <Card className="rounded-3xl"><CardHeader><CardTitle>{title}</CardTitle></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{[heading,"Proyeksi","Realisasi","Selisih","% Realisasi","Status"].map((h)=><TableHead key={h}>{h}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map((r)=><TableRow key={r.name}><TableCell className="font-bold">{r.name}</TableCell><TableCell>{rupiah(r.projected)}</TableCell><TableCell>{rupiah(r.realized)}</TableCell><TableCell>{rupiah(r.difference)}</TableCell><TableCell>{percent(r.realized,r.projected).toFixed(1)}%</TableCell><TableCell><Badge className={statusClass(status(r.projected,r.realized))}>{status(r.projected,r.realized)}</Badge></TableCell></TableRow>)}{!rows.length&&<EmptyRow span={6}/>}</TableBody></Table></CardContent></Card>; }
