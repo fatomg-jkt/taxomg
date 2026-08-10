@@ -2,7 +2,7 @@
 
 import { ChangeEvent, useEffect, useRef, useState } from "react";
 import * as XLSX from "xlsx";
-import { BadgeDollarSign, Cloud, FileSpreadsheet, Percent, PiggyBank, Plus, ShieldCheck, Target, Trash2, X } from "lucide-react";
+import { BadgeDollarSign, ChevronDown, Cloud, FileSpreadsheet, Percent, PiggyBank, Plus, ShieldCheck, Target, Trash2, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { CASHFLOW_BRANDS, CASHFLOW_DEPARTMENTS, CASHFLOW_TYPES, EMPTY_CASHFLOW, normalizeCashflow, safeAmount, type CashflowData, type CashflowEntry } from "@/lib/cashflow";
 
 export type CashflowPage = "cashflow" | "cashflowProjection" | "cashflowActual";
-const ALL = "__all__";
 const WEEKS = Array.from({ length: 27 }, (_, index) => `Week ${index + 26}`);
 const rupiah = (value: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number.isFinite(value) ? value : 0);
 const percent = (actual: number, projection: number) => projection ? actual / projection * 100 : 0;
