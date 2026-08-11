@@ -53,3 +53,97 @@
     radial-gradient(circle at top left, rgb(59 130 246 / 0.16), transparent 34rem),
     radial-gradient(circle at top right, rgb(20 184 166 / 0.16), transparent 30rem);
 }
+
+/* Dashboard Tax: highlight KPI nominal/total cards without changing layout or data. */
+section[class~="xl:grid-cols-4"] > div:has(button[title^="Edit nominal"]) {
+  border-color: #bfdbfe !important;
+  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%) !important;
+  box-shadow: 0 10px 26px rgb(37 99 235 / 0.08);
+}
+section[class~="xl:grid-cols-4"] > div:has(button[title^="Edit nominal"]) p:last-child {
+  color: #0f3f91;
+}
+section[class~="2xl:grid-cols-6"] > div:nth-child(1) {
+  border-color: #93c5fd !important;
+  background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%) !important;
+  box-shadow: 0 12px 28px rgb(37 99 235 / 0.10);
+}
+section[class~="2xl:grid-cols-6"] > div:nth-child(2) {
+  border-color: #86efac !important;
+  background: linear-gradient(135deg, #ffffff 0%, #dcfce7 100%) !important;
+}
+section[class~="2xl:grid-cols-6"] > div:nth-child(3) {
+  border-color: #fdba74 !important;
+  background: linear-gradient(135deg, #ffffff 0%, #ffedd5 100%) !important;
+}
+
+/* Dashboard Tax overview: make the bar chart presentation match the uploaded reference. */
+section[class~="xl:grid-cols-5"] > div:nth-child(2) .recharts-responsive-container {
+  border-radius: 18px;
+  background: linear-gradient(90deg, rgb(239 246 255 / 0.72), rgb(248 250 252 / 0.35));
+}
+section[class~="xl:grid-cols-5"] > div:nth-child(2) .recharts-cartesian-grid-horizontal line {
+  stroke: #dbeafe;
+  stroke-dasharray: 4 5;
+}
+section[class~="xl:grid-cols-5"] > div:nth-child(2) .recharts-bar-rectangle path {
+  filter: drop-shadow(0 3px 5px rgb(15 23 42 / 0.08));
+}
+section[class~="xl:grid-cols-5"] > div:nth-child(2) .recharts-legend-item-text {
+  font-weight: 600;
+  color: #334155 !important;
+}
+
+/* Control Omzet: Arial only on this page. */
+main:has(table.w-max.min-w-full.border-separate) {
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+main:has(table.w-max.min-w-full.border-separate) * {
+  font-family: Arial, Helvetica, sans-serif !important;
+}
+
+/* Control Omzet table group colors: 1001 pink, Obsidian blue, Resto green, Management purple. */
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-emerald-700 {
+  background-color: #db2777 !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-emerald-100 {
+  background-color: #fce7f3 !important;
+  color: #831843 !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-emerald-50 {
+  background-color: #fdf2f8 !important;
+  color: #9d174d !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-slate-800 {
+  background-color: #2563eb !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-slate-200 {
+  background-color: #dbeafe !important;
+  color: #1e3a8a !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-slate-100 {
+  background-color: #eff6ff !important;
+  color: #1d4ed8 !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-rose-800 {
+  background-color: #15803d !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-rose-200 {
+  background-color: #bbf7d0 !important;
+  color: #14532d !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-rose-100 {
+  background-color: #dcfce7 !important;
+  color: #166534 !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-purple-800 {
+  background-color: #7e22ce !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-purple-200 {
+  background-color: #e9d5ff !important;
+  color: #581c87 !important;
+}
+main:has(table.w-max.min-w-full.border-separate) table thead .bg-purple-100 {
+  background-color: #f3e8ff !important;
+  color: #6b21a8 !important;
+}
