@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Building2, Cloud, Download, Edit3, FileSpreadsheet, FileText, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import { Building2, ChevronDown, Cloud, Download, Edit3, FileSpreadsheet, FileText, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -107,6 +107,7 @@ const Actions = ({ edit, remove }: { edit?: () => void; remove: () => void }) =>
 
 function CompanyContent({ rows, onEdit, onDelete }: { rows: CompanyProfile[]; onEdit: (v: ProfileDraft) => void; onDelete: (id:string)=>void }) {
   const [query, setQuery] = useState("");
+  const [openCompany, setOpenCompany] = useState("");
   const visibleRows = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("id-ID");
     return rows
@@ -146,29 +147,27 @@ function CompanyContent({ rows, onEdit, onDelete }: { rows: CompanyProfile[]; on
     <div className="grid gap-4 sm:grid-cols-3"><Summary icon={Building2} label="Total Perusahaan" value={rows.length}/><Summary icon={Building2} label="Perusahaan Aktif" value={rows.filter(r=>r.status==="Aktif").length}/><Summary icon={FileText} label="Perlu Update" value={rows.filter(r=>r.status==="Perlu Update").length}/></div>
     <Card className="overflow-hidden rounded-3xl">
       <CardHeader className="gap-4 border-b border-slate-200 sm:flex-row sm:items-center sm:justify-between">
-        <div><CardTitle>Tabel Legalitas Perusahaan</CardTitle><p className="mt-1 text-sm font-medium text-slate-500">Geser tabel ke kanan untuk melihat perusahaan lainnya.</p></div>
+        <div><CardTitle>Legalitas Perusahaan</CardTitle><p className="mt-1 text-sm font-medium text-slate-500">Klik nama PT atau perusahaan untuk melihat rincian legalitas.</p></div>
         <div className="relative w-full sm:w-80"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"/><Input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="Cari perusahaan atau grup..." className="rounded-xl pl-9" aria-label="Cari perusahaan atau grup"/></div>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="p-5">
         {!rows.length ? <div className="p-6"><Empty text="Belum ada Company Profile. Upload Excel atau klik Tambah Company Profile untuk mulai."/></div> : !visibleRows.length ? <div className="p-6"><Empty text="Perusahaan atau grup tidak ditemukan."/></div> :
-        <div className="max-h-[62vh] max-w-full overflow-auto">
-          <table className="w-max min-w-full border-separate border-spacing-0 text-xs">
-            <thead><tr>
-              <th className="sticky left-0 top-0 z-30 min-w-56 border-b border-r border-blue-950 bg-blue-950 px-5 py-4 text-left text-base font-black text-white">Legalitas</th>
-              {visibleRows.map((row)=><th key={row.id} className="sticky top-0 z-20 min-w-64 max-w-72 border-b border-r border-blue-300 bg-blue-100 px-4 py-3 text-left align-top text-blue-950"><span className="block min-h-10 text-base font-black leading-snug">{display(row.companyName)}</span><span className="mt-2 flex gap-1"><Button variant="ghost" size="icon" onClick={()=>onEdit(row)} aria-label={`Edit ${row.companyName}`} className="h-8 w-8 hover:bg-blue-200"><Edit3 className="h-4 w-4"/></Button><Button variant="ghost" size="icon" onClick={()=>onDelete(row.id)} aria-label={`Hapus ${row.companyName}`} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4"/></Button></span></th>)}
-            </tr></thead>
-            <tbody>
-              {fields.map((field)=><tr key={field.key} className="group">
-                <th scope="row" className="sticky left-0 z-10 min-w-56 border-b border-r border-slate-300 bg-slate-50 px-5 py-2.5 text-left font-bold text-slate-800 group-hover:bg-blue-50">{field.label}</th>
-                {visibleRows.map((row)=><td key={row.id} className="min-w-64 max-w-72 whitespace-pre-wrap break-words border-b border-r border-slate-300 bg-white px-4 py-2.5 align-top font-medium leading-snug text-slate-700 group-hover:bg-slate-50">{display(row[field.key])}</td>)}
-              </tr>)}
-              <tr><th scope="row" className="sticky left-0 z-10 border-b border-r border-blue-950 bg-blue-950 px-5 py-4 text-left text-base font-black text-white">Direksi &amp; Komisaris</th><td colSpan={visibleRows.length} className="border-b border-blue-950 bg-blue-950"/></tr>
-              {managementFields.map((field)=><tr key={field.key} className="group">
-                <th scope="row" className="sticky left-0 z-10 min-w-56 border-b border-r border-slate-300 bg-slate-50 px-5 py-2.5 text-left font-bold text-slate-800 group-hover:bg-blue-50">{field.label}</th>
-                {visibleRows.map((row)=><td key={row.id} className="min-w-64 max-w-72 whitespace-pre-wrap break-words border-b border-r border-slate-300 bg-white px-4 py-2.5 align-top font-medium leading-snug text-slate-700 group-hover:bg-slate-50">{display(row[field.key])}</td>)}
-              </tr>)}
-            </tbody>
-          </table>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {visibleRows.map((row) => { const expanded = openCompany === row.id; return <div key={row.id} className={`overflow-hidden rounded-2xl border bg-white transition ${expanded ? "border-blue-300 shadow-md lg:col-span-2" : "border-slate-200 shadow-sm hover:border-blue-200 hover:shadow-md"}`}>
+            <div className="flex items-center gap-2 p-2">
+              <button type="button" onClick={()=>setOpenCompany((current)=>current===row.id?"":row.id)} aria-expanded={expanded} className="flex min-w-0 flex-1 items-center justify-between gap-4 rounded-xl p-3 text-left transition hover:bg-blue-50">
+                <div className="min-w-0"><p className="truncate text-base font-black text-slate-900">{display(row.companyName)}</p><div className="mt-1 flex items-center gap-2"><span className="truncate text-xs font-semibold text-slate-500">{display(row.brandGroup)}</span><StatusBadge value={row.status}/></div></div>
+                <ChevronDown className={`h-5 w-5 shrink-0 text-slate-500 transition-transform ${expanded ? "rotate-180" : ""}`}/>
+              </button>
+              <Button variant="ghost" size="icon" onClick={()=>onEdit(row)} aria-label={`Edit ${row.companyName}`} className="h-9 w-9 shrink-0 text-blue-700 hover:bg-blue-50"><Edit3 className="h-4 w-4"/></Button>
+              <Button variant="ghost" size="icon" onClick={()=>onDelete(row.id)} aria-label={`Hapus ${row.companyName}`} className="h-9 w-9 shrink-0 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4"/></Button>
+            </div>
+            {expanded && <div className="border-t border-slate-200 bg-slate-50/70 p-5">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{fields.map((field)=><div key={field.key} className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-[11px] font-black uppercase tracking-wide text-slate-400">{field.label}</p><p className="mt-1 whitespace-pre-wrap break-words text-sm font-semibold text-slate-800">{display(row[field.key])}</p></div>)}</div>
+              <h4 className="mb-3 mt-5 text-sm font-black uppercase tracking-wide text-blue-900">Direksi &amp; Komisaris</h4>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{managementFields.map((field)=><div key={field.key} className="rounded-xl border border-blue-100 bg-white p-3"><p className="text-[11px] font-black uppercase tracking-wide text-blue-500">{field.label}</p><p className="mt-1 whitespace-pre-wrap break-words text-sm font-semibold text-slate-800">{display(row[field.key])}</p></div>)}</div>
+            </div>}
+          </div>; })}
         </div>}
       </CardContent>
     </Card>
