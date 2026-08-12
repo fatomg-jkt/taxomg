@@ -151,21 +151,21 @@ function CompanyContent({ rows, onEdit, onDelete }: { rows: CompanyProfile[]; on
       </CardHeader>
       <CardContent className="p-0">
         {!rows.length ? <div className="p-6"><Empty text="Belum ada Company Profile. Upload Excel atau klik Tambah Company Profile untuk mulai."/></div> : !visibleRows.length ? <div className="p-6"><Empty text="Perusahaan atau grup tidak ditemukan."/></div> :
-        <div className="max-w-full overflow-x-auto">
-          <table className="w-max min-w-full border-separate border-spacing-0 text-sm">
+        <div className="max-h-[62vh] max-w-full overflow-auto">
+          <table className="w-max min-w-full border-separate border-spacing-0 text-xs">
             <thead><tr>
               <th className="sticky left-0 top-0 z-30 min-w-56 border-b border-r border-blue-950 bg-blue-950 px-5 py-4 text-left text-base font-black text-white">Legalitas</th>
               {visibleRows.map((row)=><th key={row.id} className="sticky top-0 z-20 min-w-64 max-w-72 border-b border-r border-blue-300 bg-blue-100 px-4 py-3 text-left align-top text-blue-950"><span className="block min-h-10 text-base font-black leading-snug">{display(row.companyName)}</span><span className="mt-2 flex gap-1"><Button variant="ghost" size="icon" onClick={()=>onEdit(row)} aria-label={`Edit ${row.companyName}`} className="h-8 w-8 hover:bg-blue-200"><Edit3 className="h-4 w-4"/></Button><Button variant="ghost" size="icon" onClick={()=>onDelete(row.id)} aria-label={`Hapus ${row.companyName}`} className="h-8 w-8 text-red-600 hover:bg-red-100"><Trash2 className="h-4 w-4"/></Button></span></th>)}
             </tr></thead>
             <tbody>
               {fields.map((field)=><tr key={field.key} className="group">
-                <th scope="row" className="sticky left-0 z-10 min-w-56 border-b border-r border-slate-300 bg-slate-50 px-5 py-4 text-left font-bold text-slate-800 group-hover:bg-blue-50">{field.label}</th>
-                {visibleRows.map((row)=><td key={row.id} className="min-w-64 max-w-72 whitespace-pre-wrap break-words border-b border-r border-slate-300 bg-white px-4 py-4 align-top font-medium leading-relaxed text-slate-700 group-hover:bg-slate-50">{display(row[field.key])}</td>)}
+                <th scope="row" className="sticky left-0 z-10 min-w-56 border-b border-r border-slate-300 bg-slate-50 px-5 py-2.5 text-left font-bold text-slate-800 group-hover:bg-blue-50">{field.label}</th>
+                {visibleRows.map((row)=><td key={row.id} className="min-w-64 max-w-72 whitespace-pre-wrap break-words border-b border-r border-slate-300 bg-white px-4 py-2.5 align-top font-medium leading-snug text-slate-700 group-hover:bg-slate-50">{display(row[field.key])}</td>)}
               </tr>)}
               <tr><th scope="row" className="sticky left-0 z-10 border-b border-r border-blue-950 bg-blue-950 px-5 py-4 text-left text-base font-black text-white">Direksi &amp; Komisaris</th><td colSpan={visibleRows.length} className="border-b border-blue-950 bg-blue-950"/></tr>
               {managementFields.map((field)=><tr key={field.key} className="group">
-                <th scope="row" className="sticky left-0 z-10 min-w-56 border-b border-r border-slate-300 bg-slate-50 px-5 py-4 text-left font-bold text-slate-800 group-hover:bg-blue-50">{field.label}</th>
-                {visibleRows.map((row)=><td key={row.id} className="min-w-64 max-w-72 whitespace-pre-wrap break-words border-b border-r border-slate-300 bg-white px-4 py-4 align-top font-medium leading-relaxed text-slate-700 group-hover:bg-slate-50">{display(row[field.key])}</td>)}
+                <th scope="row" className="sticky left-0 z-10 min-w-56 border-b border-r border-slate-300 bg-slate-50 px-5 py-2.5 text-left font-bold text-slate-800 group-hover:bg-blue-50">{field.label}</th>
+                {visibleRows.map((row)=><td key={row.id} className="min-w-64 max-w-72 whitespace-pre-wrap break-words border-b border-r border-slate-300 bg-white px-4 py-2.5 align-top font-medium leading-snug text-slate-700 group-hover:bg-slate-50">{display(row[field.key])}</td>)}
               </tr>)}
             </tbody>
           </table>
