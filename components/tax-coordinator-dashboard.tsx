@@ -276,6 +276,11 @@ const DEFAULT_FINANCE_STRUCTURE: Record<string, FinanceStructureItem[]> = {
     { type: "entity", name: "PT Mimama Laku Selalu" },
     { type: "entity", name: "CV Seribu Toko Sukses" },
   ],
+  "TRIPLE EGG": [
+    { type: "entity", name: "PT Makan Setiap Hari" },
+    { type: "entity", name: "PT Minum Setiap Hari" },
+    { type: "entity", name: "PT Jajan Setiap Hari" },
+  ],
   Resto: [
     { type: "entity", name: "PT Makan Setiap Hari" },
     { type: "entity", name: "PT Minum Setiap Hari" },
