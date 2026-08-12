@@ -15,7 +15,7 @@ import { CASHFLOW_BRANDS, CASHFLOW_DEPARTMENTS, EMPTY_CASHFLOW, normalizeCashflo
 export type CashflowPage = "cashflow" | "cashflowProjection" | "cashflowActual";
 const WEEKS = Array.from({ length: 27 }, (_, index) => `Week ${index + 26}`);
 const DEPARTMENT_COLORS = ["#2563EB", "#10B981", "#F97316", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#EAB308"];
-const CASHFLOW_KINDS = ["Fix Cost", "Project Cost", "Asset"] as const;
+const CASHFLOW_KINDS = ["Revenue", "Fix Cost", "Project Cost", "Asset"] as const;
 const rupiah = (value: number) => new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(Number.isFinite(value) ? value : 0);
 const percent = (actual: number, projection: number) => projection ? actual / projection * 100 : 0;
 const status = (projection: number, actual: number) => actual === projection ? "Zero" : actual < projection ? "Under · Surplus" : "Over · Defisit";
