@@ -100,14 +100,14 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
     </Card>
     {error && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">{error}</div>}
 
-    <Card className="overflow-hidden rounded-3xl border-slate-200 shadow-sm">
-      <CardHeader className="border-b border-slate-200 bg-white pb-4">
+    <Card className="overflow-hidden rounded-3xl border-blue-100 bg-white shadow-[0_20px_60px_-32px_rgba(15,23,42,0.4)]">
+      <CardHeader className="border-b border-blue-100 bg-gradient-to-r from-slate-50 via-white to-blue-50 pb-5">
         <CardTitle className="text-xl text-slate-900">YTD Control Omzet {selectedYear}</CardTitle>
         <CardDescription>Perbandingan omzet dan nilai terlapor per masa pajak. Geser tabel untuk melihat seluruh entity.</CardDescription>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-max min-w-full border-separate border-spacing-0 font-sans text-xs text-slate-700">
+        <div className="overflow-x-auto bg-slate-100/70 p-3">
+          <table className="w-max min-w-full border-separate border-spacing-y-1 font-sans text-xs text-slate-700">
             <thead className="sticky top-0 z-20">
               <tr>
                 <th rowSpan={3} className="sticky left-0 z-40 min-w-24 border-b border-r border-slate-400 bg-slate-900 px-4 py-3 text-center text-base font-black text-white shadow-[2px_0_0_#94a3b8]">Masa</th>
@@ -117,9 +117,9 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
               <tr>{visibleGroups.flatMap((group) => group.entities.flatMap((entity) => isObsidianUnreported(group.name, entity) ? [] : ([<th key={`${entity}-omzet`} className={`min-w-32 border-b border-r border-slate-300 px-3 py-2 text-center text-sm font-extrabold ${GROUP_COLORS[group.name].sub}`}>Omset</th>, <th key={`${entity}-terlapor`} className={`min-w-32 border-b border-r border-slate-300 px-3 py-2 text-center text-sm font-extrabold ${GROUP_COLORS[group.name].sub}`}>Terlapor</th>])))}</tr>
             </thead>
             <tbody>
-              {visibleMonths.map((masa, index) => <tr key={masa} className={index % 2 ? "bg-slate-50" : "bg-white"}>
-                <th className="sticky left-0 z-10 border-b border-r border-slate-300 bg-inherit px-4 py-3 text-left font-bold text-slate-800 shadow-[2px_0_0_#e2e8f0]">{MONTH_LABELS[CONTROL_OMZET_MONTHS.indexOf(masa)]} {String(selectedYear).slice(-2)}</th>
-                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => isObsidianUnreported(group.name, entity) ? [<td key={`${masa}-${entity}`} className="min-w-64 border-b border-r border-slate-200 px-3 py-3 text-right tabular-nums">{number(obsidianUnreportedValue(masa))}</td>] : (["omzet", "terlapor"] as const).map((key) => <td key={`${masa}-${entity}-${key}`} className="border-b border-r border-slate-200 px-3 py-3 text-right tabular-nums">{number(cellValue(masa, group.name, entity, key))}</td>)))}
+              {visibleMonths.map((masa) => <tr key={masa} className="bg-white shadow-sm transition hover:-translate-y-px hover:bg-blue-50/70 hover:shadow-md">
+                <th className="sticky left-0 z-10 border-y border-l border-slate-200 bg-white px-4 py-3 text-left font-black text-slate-800 shadow-[3px_0_8px_-5px_#64748b] first:rounded-l-xl">{MONTH_LABELS[CONTROL_OMZET_MONTHS.indexOf(masa)]} {String(selectedYear).slice(-2)}</th>
+                {visibleGroups.flatMap((group) => group.entities.flatMap((entity) => isObsidianUnreported(group.name, entity) ? [<td key={`${masa}-${entity}`} className="min-w-64 border-y border-r border-slate-200 px-3 py-3 text-right tabular-nums">{number(obsidianUnreportedValue(masa))}</td>] : (["omzet", "terlapor"] as const).map((key) => <td key={`${masa}-${entity}-${key}`} className="border-y border-r border-slate-200 px-3 py-3 text-right font-medium tabular-nums">{number(cellValue(masa, group.name, entity, key))}</td>)))}
               </tr>)}
               <tr className="bg-slate-800 font-extrabold text-white">
                 <th className="sticky left-0 z-10 border-r border-slate-600 bg-slate-900 px-4 py-3 text-center text-sm shadow-[2px_0_0_#475569]">Total</th>
