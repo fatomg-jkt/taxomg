@@ -850,7 +850,7 @@ function brandHeaderStyle(brand: string) {
 }
 function BrandDetails({ accounts, allAccounts, scopedBrand, onAddAccount, onUpdateAccount, onDeleteAccount }: { accounts: FinanceAccount[]; allAccounts: FinanceAccount[]; scopedBrand: string; onAddAccount: (brand?: string, destination?: FinanceStructureItem) => void; onUpdateAccount: (id: string, patch: Partial<FinanceAccount>) => void; onDeleteAccount: (id: string) => void }) {
   const [selectedBrand, setSelectedBrand] = useState("");
-  const brands = Array.from(new Set([...(scopedBrand ? [scopedBrand] : DEFAULT_FINANCE_BRANDS), ...accounts.map(a=>a.brand)]));
+  const brands = Array.from(new Set([...(scopedBrand ? [scopedBrand] : DEFAULT_FINANCE_BRANDS), ...accounts.map(a=>a.brand)])).filter((brand)=>brand!=="Resto");
   return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{brands.map((brand)=>{
     const rows = accounts.filter(a=>a.brand===brand);
     const brandRows = allAccounts.filter(a=>a.brand===brand);
@@ -864,9 +864,10 @@ function BrandDetails({ accounts, allAccounts, scopedBrand, onAddAccount, onUpda
     const legacyRows = rows.filter((row) => !assignedIds.has(row.id));
     const customStyle = brandHeaderStyle(brand);
     const expanded = selectedBrand === brand;
+    const lightCard = brand === "HUNIAN";
     return <Card key={brand} className={cn("overflow-hidden rounded-3xl border-[#D8E0EA] bg-white shadow-sm transition-shadow", expanded && "md:col-span-2 xl:col-span-3 shadow-xl ring-2 ring-blue-300")}>
-      <button type="button" aria-expanded={expanded} onClick={()=>setSelectedBrand((current)=>current===brand?"":brand)} style={customStyle} className={cn("flex w-full items-center justify-between gap-4 p-6 text-left text-white transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-inset focus:ring-blue-300", !customStyle && "bg-gradient-to-r from-slate-900 to-blue-700")}>
-        <div className="min-w-0"><p className="text-[11px] font-black uppercase tracking-[0.2em] text-white/70">Brand</p><h3 className="mt-1 truncate text-xl font-black">{brand}</h3><p className="mt-2 text-sm font-semibold text-white/75">{plainNumber(brandRows.length)} rekening/akun</p></div>
+      <button type="button" aria-expanded={expanded} onClick={()=>setSelectedBrand((current)=>current===brand?"":brand)} style={customStyle} className={cn("flex w-full items-center justify-between gap-4 p-6 text-left transition hover:brightness-105 focus:outline-none focus:ring-4 focus:ring-inset focus:ring-blue-300", lightCard ? "text-slate-950" : "text-white", !customStyle && "bg-gradient-to-r from-slate-900 to-blue-700")}>
+        <div className="min-w-0"><p className={cn("text-[11px] font-black uppercase tracking-[0.2em]",lightCard?"text-slate-700":"text-white/70")}>Brand</p><h3 className="mt-1 truncate text-xl font-black">{brand}</h3><p className={cn("mt-2 text-sm font-semibold",lightCard?"text-slate-800":"text-white/75")}>{plainNumber(brandRows.length)} rekening/akun</p></div>
         <div className="flex shrink-0 items-center gap-4"><p className="text-right text-xl font-black sm:text-2xl">{rupiah(brandRows.reduce((a,r)=>a+r.balance,0))}</p><ChevronDown className={cn("h-5 w-5 transition-transform",expanded&&"rotate-180")}/></div>
       </button>
       {expanded && <CardContent className="space-y-4 p-5">
