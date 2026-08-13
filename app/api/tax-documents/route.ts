@@ -1,5 +1,6 @@
 import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
+import { isOneDriveConfigured, oneDrivePathname, sanitizeOneDriveFileName, uploadFileToOneDrive } from "@/lib/onedrive-storage";
 import { blobOptions, hasBlobConfig, metadataPathname, readMetadata, type UploadedPdfDocument } from "./shared";
 
 const noStoreHeaders = { "Cache-Control": "no-store" };
@@ -41,7 +42,7 @@ export async function GET() {
     const documents = await readMetadata();
     return NextResponse.json({ documents }, { headers: noStoreHeaders });
   } catch (error) {
-    console.error("[tax-documents] Failed to read PDF metadata from Vercel Blob", error);
+    console.error("[tax-documents] Failed to read PDF metadata", error);
     return NextResponse.json({ documents: [] }, { headers: noStoreHeaders });
   }
 }
@@ -58,27 +59,36 @@ export async function POST(request: Request) {
   });
   const file = formData?.get("file");
   if (!(file instanceof File)) return NextResponse.json({ ok: false, error: "File PDF wajib dipilih." }, { status: 400 });
-
   if (!isPdfFile(file)) return NextResponse.json({ ok: false, error: "File harus berformat PDF." }, { status: 400 });
 
   const uploadedAt = new Date().toISOString();
   const id = `pdf-${crypto.randomUUID()}`;
   const originalName = sanitizeFileName(file.name);
-  const pathname = `${prefix}${id}-${originalName}`;
+  let pathname = "";
+  let fileUrl = "";
+  let storage: "onedrive" | "vercel-blob" = "vercel-blob";
 
-  let blobUrl = "";
   try {
-    const blob = await put(pathname, file, {
-      access: "private",
-      contentType: "application/pdf",
-      addRandomSuffix: false,
-      allowOverwrite: false,
-      ...blobOptions(),
-    });
-    blobUrl = blob.url;
+    if (isOneDriveConfigured()) {
+      const oneDriveFile = new File([await file.arrayBuffer()], sanitizeOneDriveFileName(originalName), { type: file.type || "application/pdf" });
+      const item = await uploadFileToOneDrive(oneDriveFile, "Tax/Dokumen Pajak");
+      pathname = oneDrivePathname(item.id);
+      fileUrl = item.webUrl || "";
+      storage = "onedrive";
+    } else {
+      pathname = `${prefix}${id}-${originalName}`;
+      const blob = await put(pathname, file, {
+        access: "private",
+        contentType: "application/pdf",
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        ...blobOptions(),
+      });
+      fileUrl = blob.url;
+    }
   } catch (error) {
-    console.error("[tax-documents] Failed to upload PDF to Vercel Blob", { pathname, size: file.size, type: file.type, error });
-    return NextResponse.json({ ok: false, error: isPrivateStoreMismatch(error) ? privateStoreMismatchMessage : "Gagal upload ke Vercel Blob." }, { status: 500 });
+    console.error("[tax-documents] Failed to upload PDF", { file: originalName, error });
+    return NextResponse.json({ ok: false, error: isPrivateStoreMismatch(error) ? privateStoreMismatchMessage : "Gagal upload dokumen." }, { status: 500 });
   }
 
   const document: UploadedPdfDocument = {
@@ -89,16 +99,16 @@ export async function POST(request: Request) {
     uploadedAt,
     size: file.size,
     type: file.type || "application/pdf",
-    url: blobUrl,
+    url: fileUrl,
   };
 
   try {
     const documents = await readMetadata();
     await writeMetadata([document, ...documents]);
   } catch (error) {
-    console.error("[tax-documents] Failed to save PDF metadata to Vercel Blob", { document, error });
+    console.error("[tax-documents] Failed to save PDF metadata", { document, error });
     return NextResponse.json({ ok: false, error: isPrivateStoreMismatch(error) ? privateStoreMismatchMessage : "Gagal menyimpan metadata dokumen." }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, document }, { status: 201 });
+  return NextResponse.json({ ok: true, document, storage }, { status: 201 });
 }
