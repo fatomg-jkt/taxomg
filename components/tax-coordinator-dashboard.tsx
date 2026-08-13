@@ -466,7 +466,7 @@ export function TaxCoordinatorDashboard({ user, onLogout }: { user: { email: str
   function updateFinanceAccount(id: string, patch: Partial<FinanceAccount>) { setFinanceAccounts((rows) => rows.map((row) => row.id === id ? normalizeFinanceAccount({ ...row, ...patch }) : row)); }
   function addFinanceAccount(brand = "", destination?: FinanceStructureItem) {
     const selectedBrand = brand || "Obsidian";
-    const selectedDestination = destination ?? DEFAULT_FINANCE_STRUCTURE[selectedBrand]?.[0];
+    const selectedDestination = destination ?? (selectedBrand === "TRIPLE EGG" ? undefined : DEFAULT_FINANCE_STRUCTURE[selectedBrand]?.[0]);
     const account = normalizeFinanceAccount({ brand: selectedBrand, group: selectedDestination?.type === "group" ? selectedDestination.name : "Entity", entity: selectedDestination?.type === "entity" ? selectedDestination.name : selectedDestination?.name || "Entity Belum Diisi", accountName: "", provider: "", accountNumber: "", accountType: "Bank", balance: 0, source: "Manual Input" });
     setFinanceAccounts((rows) => [...rows, { ...account, accountName: "", provider: "", accountNumber: "", accountType: "Bank", balance: 0 }]);
     setMessage("Rekening finance ditambahkan. Klik Save to Cloud agar tersimpan.");
