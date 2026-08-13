@@ -1,6 +1,7 @@
 import { DashboardAuth } from "@/components/dashboard-auth";
+import { SidebarDashboardAccordion } from "@/components/sidebar-dashboard-accordion";
 import { UserAccessSettingsOverlay } from "@/components/user-access-settings-overlay";
 
 export default function Home() {
-  return <><DashboardAuth /><UserAccessSettingsOverlay /></>;
+  return <><DashboardAuth /><SidebarDashboardAccordion /><UserAccessSettingsOverlay /></>;
 }
