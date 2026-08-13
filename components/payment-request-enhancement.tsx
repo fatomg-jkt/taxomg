@@ -12,6 +12,20 @@ function currentPage() {
   return new URLSearchParams(window.location.search).get("page") || "";
 }
 
+function findFinanceContent() {
+  const nav = document.querySelector("aside nav");
+  if (!nav) return null;
+
+  for (const section of Array.from(nav.children)) {
+    if (!(section instanceof HTMLElement)) continue;
+    const header = section.firstElementChild;
+    const content = header?.nextElementSibling;
+    if (!(header instanceof HTMLElement) || !(content instanceof HTMLElement)) continue;
+    if (header.textContent?.trim().toUpperCase() === "DASHBOARD FINANCE") return content;
+  }
+  return null;
+}
+
 export function PaymentRequestEnhancement() {
   const [active, setActive] = useState(false);
   const [menuHost, setMenuHost] = useState<HTMLElement | null>(null);
@@ -25,22 +39,29 @@ export function PaymentRequestEnhancement() {
       const isActive = currentPage() === PAGE_ID;
       setActive(isActive);
 
-      const aside = document.querySelector("aside");
-      const cashflowButton = Array.from(aside?.querySelectorAll<HTMLButtonElement>("button") || []).find((button) => button.textContent?.trim() === "Cashflow");
-      const cashflowSection = cashflowButton?.parentElement;
-      if (cashflowSection instanceof HTMLElement) {
-        let host = cashflowSection.parentElement?.querySelector<HTMLElement>("[data-payment-request-menu-host]") || null;
-        if (!host) {
-          host = document.createElement("div");
-          host.dataset.paymentRequestMenuHost = "true";
-          cashflowSection.insertAdjacentElement("afterend", host);
+      const financeContent = findFinanceContent();
+      if (financeContent) {
+        const cashflowButton = Array.from(financeContent.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "Cashflow");
+        if (cashflowButton) {
+          let host = financeContent.querySelector<HTMLElement>(":scope > [data-payment-request-menu-host]");
+          if (!host) {
+            host = document.createElement("div");
+            host.dataset.paymentRequestMenuHost = "true";
+          }
+
+          const cashflowWrapper = cashflowButton.parentElement;
+          if (cashflowWrapper?.parentElement === financeContent) {
+            cashflowWrapper.insertAdjacentElement("afterend", host);
+          } else {
+            cashflowButton.insertAdjacentElement("afterend", host);
+          }
+          setMenuHost((current) => current === host ? current : host);
         }
-        setMenuHost((current) => current === host ? current : host);
       }
 
       const shell = document.querySelector<HTMLElement>("main > div.min-h-screen");
       if (shell) {
-        let host = shell.querySelector<HTMLElement>("[data-payment-request-content-host]");
+        let host = shell.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]");
         if (!host) {
           host = document.createElement("div");
           host.dataset.paymentRequestContentHost = "true";
@@ -48,9 +69,8 @@ export function PaymentRequestEnhancement() {
         }
         setContentHost((current) => current === host ? current : host);
 
-        const children = Array.from(shell.children).filter((node): node is HTMLElement => node instanceof HTMLElement && node !== host);
-        for (const child of children) {
-          if (child.tagName === "HEADER") continue;
+        for (const child of Array.from(shell.children)) {
+          if (!(child instanceof HTMLElement) || child === host || child.tagName === "HEADER") continue;
           child.style.display = isActive ? "none" : "";
         }
         host.style.display = isActive ? "block" : "none";
@@ -60,6 +80,7 @@ export function PaymentRequestEnhancement() {
     const onNavigation = () => sync();
     const originalPushState = window.history.pushState.bind(window.history);
     const originalReplaceState = window.history.replaceState.bind(window.history);
+
     window.history.pushState = ((...args: Parameters<History["pushState"]>) => {
       originalPushState(...args);
       window.dispatchEvent(new Event("payment-request-navigation"));
@@ -82,12 +103,13 @@ export function PaymentRequestEnhancement() {
       window.removeEventListener("payment-request-navigation", onNavigation);
       window.history.pushState = originalPushState;
       window.history.replaceState = originalReplaceState;
+
       const shell = document.querySelector<HTMLElement>("main > div.min-h-screen");
       if (shell) {
-        const host = shell.querySelector<HTMLElement>("[data-payment-request-content-host]");
-        Array.from(shell.children).forEach((node) => {
-          if (node instanceof HTMLElement && node !== host && node.tagName !== "HEADER") node.style.display = "";
-        });
+        const host = shell.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]");
+        for (const child of Array.from(shell.children)) {
+          if (child instanceof HTMLElement && child !== host && child.tagName !== "HEADER") child.style.display = "";
+        }
       }
     };
   }, []);
@@ -101,7 +123,10 @@ export function PaymentRequestEnhancement() {
 
   return <>
     {menuHost ? createPortal(
-      <button onClick={navigate} className={`mt-1 flex w-full items-center gap-3 rounded-2xl px-4 py-2.5 text-left text-sm font-semibold transition ${active ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}>
+      <button
+        onClick={navigate}
+        className={`flex w-full items-center gap-3 rounded-2xl px-4 py-2.5 text-left text-sm font-semibold transition ${active ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
+      >
         <ReceiptText className="h-5 w-5 shrink-0" />
         <span>Pengajuan Pembayaran</span>
       </button>,
