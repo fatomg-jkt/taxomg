@@ -7,7 +7,9 @@ export type UserAccess = {
   role: UserRole;
 };
 
-// Konfigurasi akun dipusatkan di sini agar mudah diganti oleh administrator.
+export type UserDirectoryEntry = Omit<UserAccess, "password"> & { id?: string };
+
+// Konfigurasi akun default. Perubahan dari menu Pengaturan User disimpan terpisah di cloud.
 export const USER_ACCESS: readonly UserAccess[] = [
   { name: "Owner", email: "owner@company.com", password: "owner123", role: "OWNER" },
   { name: "Super Admin", email: "superadmin@company.com", password: "superadmin123", role: "SUPER_ADMIN" },
@@ -18,18 +20,36 @@ export const USER_ACCESS: readonly UserAccess[] = [
 export type DashboardArea = "tax" | "finance" | "legal";
 
 export const AUTH_STORAGE_KEY = "authSession";
+export const USER_DIRECTORY_STORAGE_KEY = "taxomg-user-directory-v1";
 
 export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+function cachedDirectory(): UserDirectoryEntry[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = window.localStorage.getItem(USER_DIRECTORY_STORAGE_KEY);
+    if (!stored) return [];
+    const parsed = JSON.parse(stored);
+    return Array.isArray(parsed) ? parsed.filter((user) => user && typeof user.email === "string" && typeof user.role === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export function getUserByEmail(email: string) {
   const normalizedEmail = normalizeEmail(email);
+  const cached = cachedDirectory().find((user) => normalizeEmail(user.email) === normalizedEmail);
+  if (cached) return { ...cached, password: "" } satisfies UserAccess;
   return USER_ACCESS.find((user) => normalizeEmail(user.email) === normalizedEmail) ?? null;
 }
 
 export function validateLogin(email: string, password: string) {
-  const user = getUserByEmail(email);
+  // Bila direktori cloud sudah pernah dimuat, login ditangani controller server-side
+  // agar password hasil pengaturan tidak perlu disimpan di browser.
+  if (cachedDirectory().length) return null;
+  const user = USER_ACCESS.find((item) => normalizeEmail(item.email) === normalizeEmail(email));
   if (!user || user.password !== password) return null;
   return user;
 }
