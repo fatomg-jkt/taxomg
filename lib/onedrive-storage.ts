@@ -114,11 +114,10 @@ async function getRootItem() {
 
 async function findChild(parentId: string, name: string) {
   const driveId = process.env.ONEDRIVE_DRIVE_ID!;
-  const escapedName = name.replace(/'/g, "''");
   const base = parentId === "root"
     ? `/drives/${encodeURIComponent(driveId)}/root/children`
     : `/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(parentId)}/children`;
-  const response = await graph(`${base}?$select=id,name,folder&$filter=name eq '${encodeURIComponent(escapedName)}'`);
+  const response = await graph(`${base}?$select=id,name,folder&$top=200`);
   if (!response.ok) return null;
   const payload = await response.json() as { value?: GraphDriveItem[] };
   return payload.value?.find((item) => item.name === name && item.folder) || null;
