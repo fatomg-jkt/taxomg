@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { Eye, EyeOff, Plus, Save, Settings, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ export function UserAccessSettingsOverlay() {
   const [showActorPassword, setShowActorPassword] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [sidebarFooter, setSidebarFooter] = useState<HTMLElement | null>(null);
 
   const loadDirectory = useCallback(async () => {
     try {
@@ -53,6 +55,42 @@ export function UserAccessSettingsOverlay() {
     window.addEventListener("storage", sync);
     return () => window.removeEventListener("storage", sync);
   }, [loadDirectory]);
+
+  useEffect(() => {
+    if (!session) {
+      setSidebarFooter(null);
+      return;
+    }
+
+    let frame = 0;
+    const arrangeSidebarFooter = () => {
+      const logoutButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "Logout");
+      const footer = logoutButton?.parentElement as HTMLElement | null;
+      if (!footer || !logoutButton) {
+        frame = window.requestAnimationFrame(arrangeSidebarFooter);
+        return;
+      }
+
+      footer.style.display = "flex";
+      footer.style.flexDirection = "column";
+      footer.style.alignItems = "stretch";
+
+      const paragraphs = Array.from(footer.querySelectorAll<HTMLElement>(":scope > p"));
+      logoutButton.style.order = "2";
+      logoutButton.style.marginTop = "0.25rem";
+      if (paragraphs[0]) {
+        paragraphs[0].style.order = "3";
+        paragraphs[0].style.marginTop = "0.75rem";
+      }
+      if (paragraphs[1]) {
+        paragraphs[1].style.order = "4";
+      }
+      setSidebarFooter(footer);
+    };
+
+    frame = window.requestAnimationFrame(arrangeSidebarFooter);
+    return () => window.cancelAnimationFrame(frame);
+  }, [session]);
 
   useEffect(() => {
     const interceptLogin = async (event: Event) => {
@@ -140,10 +178,17 @@ export function UserAccessSettingsOverlay() {
 
   if (!canManage) return null;
 
+  const settingsButton = <button
+    onClick={() => { setOpen(true); loadDirectory(); }}
+    className="flex w-full items-center gap-3 rounded-2xl px-4 py-2.5 text-left text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+    style={{ order: 1 }}
+    title="Atur User ID, password, dan role"
+  >
+    <Settings className="h-5 w-5 shrink-0" /><span>Setting</span>
+  </button>;
+
   return <>
-    <button onClick={() => { setOpen(true); loadDirectory(); }} className="fixed bottom-[72px] left-5 z-[45] flex w-[248px] items-center gap-3 rounded-2xl px-4 py-2.5 text-left text-sm font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white" title="Atur User ID, password, dan role">
-      <Settings className="h-5 w-5 shrink-0" /><span>Pengaturan User</span>
-    </button>
+    {sidebarFooter ? createPortal(settingsButton, sidebarFooter) : null}
 
     {open && <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/55 p-4">
       <form onSubmit={save} className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl">
