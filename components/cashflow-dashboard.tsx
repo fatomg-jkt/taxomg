@@ -10,9 +10,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CASHFLOW_BRANDS, CASHFLOW_DEPARTMENTS, EMPTY_CASHFLOW, normalizeCashflow, safeAmount, type CashflowData, type CashflowEntry } from "@/lib/cashflow";
+import { CASHFLOW_BRANDS, CASHFLOW_DEPARTMENTS, EMPTY_CASHFLOW, normalizeCashflow, safeAmount, type CashflowData, type CashflowEntry, type PaymentRequest } from "@/lib/cashflow";
 
-export type CashflowPage = "cashflow" | "cashflowProjection" | "cashflowActual";
+export type CashflowPage = "cashflow" | "cashflowProjection" | "cashflowActual" | "cashflowPaymentRequest";
 const WEEKS = Array.from({ length: 27 }, (_, index) => `Week ${index + 26}`);
 const DEPARTMENT_COLORS = ["#2563EB", "#10B981", "#F97316", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#EAB308"];
 const CASHFLOW_KINDS = ["Revenue", "Pindah Dana", "Fix Cost", "Project Cost", "Asset"] as const;
@@ -21,6 +21,7 @@ const percent = (actual: number, projection: number) => projection ? actual / pr
 const status = (projection: number, actual: number) => actual === projection ? "Zero" : actual < projection ? "Under · Surplus" : "Over · Defisit";
 const statusClass = (value: string) => value.startsWith("Under") ? "bg-emerald-100 text-emerald-700" : value.startsWith("Over") ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600";
 const emptyEntry = (): CashflowEntry => ({ id: "", brand: "", department: "", paymentItem: "", description: "", type: "", nominal: 0, date: "", week: "", source: "Manual Input", notes: "" });
+const emptyPaymentRequest = (): PaymentRequest => ({ id: "", date: "", brand: "", department: "", description: "", nominal: 0, status: "Diajukan", source: "Manual Input" });
 
 export function CashflowDashboard({ page, verifyPassword }: { page: CashflowPage; verifyPassword: () => Promise<string | null> }) {
   const [data, setData] = useState<CashflowData>(EMPTY_CASHFLOW);
@@ -29,7 +30,31 @@ export function CashflowDashboard({ page, verifyPassword }: { page: CashflowPage
   useEffect(() => { if (loading) return; localStorage.setItem("cashflowProjectionData", JSON.stringify(data.projection)); localStorage.setItem("cashflowActualData", JSON.stringify(data.actual)); localStorage.setItem("cashflowBankMutationData", JSON.stringify(data.bankMutation)); localStorage.setItem("cashflowData", JSON.stringify(data)); }, [data, loading]);
   async function save() { const password = await verifyPassword(); if (!password) return; setSaving(true); setNotice(""); try { const response = await fetch("/api/cashflow-data", { method: "POST", headers: { "Content-Type": "application/json", "x-dashboard-password": password }, body: JSON.stringify({ cashflowData: data }) }); const payload = await response.json(); if (!response.ok) throw new Error(payload.error); setData((current) => ({ ...current, lastUpdated: payload.updatedAt })); setNotice("Cashflow berhasil disimpan ke cloud secara terpisah."); } catch (error) { setNotice(error instanceof Error ? error.message : "Save to Cloud gagal."); } finally { setSaving(false); } }
   if (loading) return <Card className="rounded-3xl"><CardContent className="p-8 text-center text-slate-500">Memuat data Cashflow...</CardContent></Card>;
-  return <div className="space-y-5">{notice && <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700">{notice}</div>}{page === "cashflow" ? <CashflowOverview data={data} onSave={save} saving={saving} /> : <CashflowEditor page={page} data={data} setData={setData} onSave={save} saving={saving} />}</div>;
+  return <div className="space-y-5">{notice && <div className="rounded-2xl border border-blue-100 bg-white p-4 text-sm font-semibold text-slate-700">{notice}</div>}{page === "cashflow" ? <CashflowOverview data={data} onSave={save} saving={saving} /> : page === "cashflowPaymentRequest" ? <PaymentRequestPage data={data} setData={setData} onSave={save} saving={saving} /> : <CashflowEditor page={page} data={data} setData={setData} onSave={save} saving={saving} />}</div>;
+}
+
+function PaymentRequestPage({ data, setData, onSave, saving }: { data: CashflowData; setData: (data: CashflowData) => void; onSave: () => void; saving: boolean }) {
+  const [form, setForm] = useState<PaymentRequest>(emptyPaymentRequest);
+  const update = (key: keyof PaymentRequest, value: string | number) => setForm((current) => ({ ...current, [key]: value }));
+  const submit = () => {
+    if (!form.date || !form.brand || !form.department || !form.description.trim() || form.nominal <= 0) { alert("Lengkapi tanggal, brand, departemen, deskripsi, dan nominal pengajuan."); return; }
+    const request = { ...form, id: form.id || `payment-request-${crypto.randomUUID()}` };
+    setData({ ...data, paymentRequests: [request, ...data.paymentRequests] });
+    setForm(emptyPaymentRequest());
+  };
+  const statusTone = (value: string) => value === "Disetujui" ? "bg-emerald-100 text-emerald-700" : value === "Ditolak" ? "bg-red-100 text-red-700" : value === "Dibayar" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700";
+  return <>
+    <Card className="rounded-3xl"><CardHeader><CardTitle>Form Pengajuan Pembayaran</CardTitle><CardDescription>Isi data pengajuan pembayaran, lalu simpan ke daftar.</CardDescription></CardHeader><CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <label className="space-y-2"><span className="text-sm font-bold">Tanggal</span><Input type="date" value={form.date} onChange={(event)=>update("date",event.target.value)} className="h-11 rounded-xl"/></label>
+      <label className="space-y-2"><span className="text-sm font-bold">Brand</span><Select value={form.brand} onChange={(event)=>update("brand",event.target.value)} className="h-11 rounded-xl"><option value="">Pilih Brand</option>{CASHFLOW_BRANDS.map((brand)=><option key={brand}>{brand}</option>)}</Select></label>
+      <label className="space-y-2"><span className="text-sm font-bold">Departemen</span><Select value={form.department} onChange={(event)=>update("department",event.target.value)} className="h-11 rounded-xl"><option value="">Pilih Departemen</option>{CASHFLOW_DEPARTMENTS.map((department)=><option key={department}>{department}</option>)}</Select></label>
+      <label className="space-y-2"><span className="text-sm font-bold">Nominal</span><Input type="number" min="0" value={String(form.nominal)} onChange={(event)=>update("nominal",safeAmount(event.target.value))} className="h-11 rounded-xl"/></label>
+      <label className="space-y-2 sm:col-span-2 xl:col-span-3"><span className="text-sm font-bold">Deskripsi</span><Input value={form.description} onChange={(event)=>update("description",event.target.value)} placeholder="Keperluan pembayaran" className="h-11 rounded-xl"/></label>
+      <label className="space-y-2"><span className="text-sm font-bold">Status</span><Select value={form.status} onChange={(event)=>update("status",event.target.value)} className="h-11 rounded-xl">{["Diajukan","Disetujui","Ditolak","Dibayar"].map((status)=><option key={status}>{status}</option>)}</Select></label>
+      <div className="flex flex-wrap gap-2 sm:col-span-2 xl:col-span-4"><Button onClick={submit} className="rounded-xl bg-blue-600"><Plus className="h-4 w-4"/> Tambah Pengajuan</Button><Button onClick={onSave} disabled={saving} variant="outline" className="rounded-xl"><Cloud className="h-4 w-4"/> {saving?"Menyimpan...":"Save to Cloud"}</Button></div>
+    </CardContent></Card>
+    <Card className="rounded-3xl"><CardHeader><CardTitle>Daftar Pengajuan Pembayaran</CardTitle><CardDescription>{data.paymentRequests.length} pengajuan tersimpan.</CardDescription></CardHeader><CardContent className="overflow-x-auto"><Table><TableHeader><TableRow>{["No","Tanggal","Brand","Departemen","Deskripsi","Nominal","Status","Aksi"].map((head)=><TableHead key={head}>{head}</TableHead>)}</TableRow></TableHeader><TableBody>{data.paymentRequests.length ? data.paymentRequests.map((row,index)=><TableRow key={row.id}><TableCell>{index+1}</TableCell><TableCell>{row.date}</TableCell><TableCell className="font-bold">{row.brand}</TableCell><TableCell>{row.department}</TableCell><TableCell className="min-w-64">{row.description}</TableCell><TableCell className="whitespace-nowrap font-bold">{rupiah(row.nominal)}</TableCell><TableCell><Badge className={statusTone(row.status)}>{row.status}</Badge></TableCell><TableCell><Button size="sm" variant="ghost" onClick={()=>setData({...data,paymentRequests:data.paymentRequests.filter((item)=>item.id!==row.id)})} className="text-red-600"><Trash2 className="h-4 w-4"/></Button></TableCell></TableRow>) : <EmptyRow span={8}/>}</TableBody></Table></CardContent></Card>
+  </>;
 }
 
 function normalizedFilter(value: string) { return value.trim().toLocaleLowerCase("id-ID"); }
