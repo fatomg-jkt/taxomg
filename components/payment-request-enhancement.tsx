@@ -12,12 +12,6 @@ function currentPage() {
   return new URLSearchParams(window.location.search).get("page") || "";
 }
 
-function findButton(label: string) {
-  const aside = document.querySelector("aside");
-  if (!aside) return null;
-  return Array.from(aside.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim().toUpperCase() === label.toUpperCase()) || null;
-}
-
 function findSection(label: string) {
   const nav = document.querySelector("aside nav");
   if (!nav) return null;
@@ -26,6 +20,17 @@ function findSection(label: string) {
     if (child.textContent?.toUpperCase().includes(label.toUpperCase())) return child;
   }
   return null;
+}
+
+function hideNativePaymentButtons() {
+  const aside = document.querySelector("aside");
+  if (!aside) return;
+  for (const button of Array.from(aside.querySelectorAll<HTMLButtonElement>("button"))) {
+    const matches = button.textContent?.trim().toUpperCase() === "PENGAJUAN PEMBAYARAN";
+    if (!matches || button.closest("[data-payment-request-dashboard-host]")) continue;
+    button.dataset.paymentRequestNativeButton = "true";
+    button.style.display = "none";
+  }
 }
 
 function contentShell() {
@@ -39,6 +44,7 @@ export function PaymentRequestEnhancement() {
 
   useEffect(() => {
     let timer = 0;
+    let observer: MutationObserver | null = null;
 
     const sync = () => {
       const aside = document.querySelector("aside");
@@ -53,11 +59,7 @@ export function PaymentRequestEnhancement() {
         return;
       }
 
-      const nativePaymentButton = findButton("Pengajuan Pembayaran");
-      if (nativePaymentButton && !nativePaymentButton.closest("[data-payment-request-dashboard-host]")) {
-        nativePaymentButton.dataset.paymentRequestNativeButton = "true";
-        nativePaymentButton.style.display = "none";
-      }
+      hideNativePaymentButtons();
 
       const nav = document.querySelector("aside nav");
       const taxSection = findSection("DASHBOARD TAX");
@@ -116,20 +118,26 @@ export function PaymentRequestEnhancement() {
 
     sync();
     timer = window.setInterval(sync, 500);
+    observer = new MutationObserver(() => {
+      hideNativePaymentButtons();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
     window.addEventListener("popstate", onNavigation);
     window.addEventListener("focus", onNavigation);
     window.addEventListener("payment-request-navigation", onNavigation);
 
     return () => {
       window.clearInterval(timer);
+      observer?.disconnect();
       window.removeEventListener("popstate", onNavigation);
       window.removeEventListener("focus", onNavigation);
       window.removeEventListener("payment-request-navigation", onNavigation);
       window.history.pushState = originalPushState;
       window.history.replaceState = originalReplaceState;
 
-      const hiddenButton = document.querySelector<HTMLButtonElement>("button[data-payment-request-native-button]");
-      if (hiddenButton) hiddenButton.style.display = "";
+      for (const hiddenButton of Array.from(document.querySelectorAll<HTMLButtonElement>("button[data-payment-request-native-button]"))) {
+        hiddenButton.style.display = "";
+      }
 
       const shell = contentShell();
       if (shell) {
