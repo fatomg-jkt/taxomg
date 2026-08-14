@@ -55,13 +55,8 @@ export function PaymentRequestEnhancement() {
 
       const nativePaymentButton = findButton("Pengajuan Pembayaran");
       if (nativePaymentButton && !nativePaymentButton.closest("[data-payment-request-dashboard-host]")) {
-        const nativeWrapper = nativePaymentButton.parentElement;
-        if (nativeWrapper instanceof HTMLElement) {
-          nativeWrapper.dataset.paymentRequestNativeWrapper = "true";
-          nativeWrapper.style.display = "none";
-        } else {
-          nativePaymentButton.style.display = "none";
-        }
+        nativePaymentButton.dataset.paymentRequestNativeButton = "true";
+        nativePaymentButton.style.display = "none";
       }
 
       const legalSection = findSection("DASHBOARD LEGAL");
@@ -120,8 +115,8 @@ export function PaymentRequestEnhancement() {
       window.history.pushState = originalPushState;
       window.history.replaceState = originalReplaceState;
 
-      const hiddenWrapper = document.querySelector<HTMLElement>("[data-payment-request-native-wrapper]");
-      if (hiddenWrapper) hiddenWrapper.style.display = "";
+      const hiddenButton = document.querySelector<HTMLButtonElement>("button[data-payment-request-native-button]");
+      if (hiddenButton) hiddenButton.style.display = "";
 
       const shell = contentShell();
       if (shell) {
