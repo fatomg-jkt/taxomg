@@ -59,16 +59,29 @@ export function PaymentRequestEnhancement() {
         nativePaymentButton.style.display = "none";
       }
 
+      const nav = document.querySelector("aside nav");
+      const taxSection = findSection("DASHBOARD TAX");
       const legalSection = findSection("DASHBOARD LEGAL");
-      if (legalSection) {
+      const financeSection = findSection("DASHBOARD FINANCE");
+
+      if (nav && taxSection && legalSection && financeSection) {
+        if (taxSection.nextElementSibling !== legalSection) {
+          taxSection.insertAdjacentElement("afterend", legalSection);
+        }
+        if (legalSection.nextElementSibling !== financeSection) {
+          legalSection.insertAdjacentElement("afterend", financeSection);
+        }
+      }
+
+      if (financeSection) {
         let host = aside!.querySelector<HTMLElement>("[data-payment-request-dashboard-host]");
         if (!host) {
           host = document.createElement("div");
           host.dataset.paymentRequestDashboardHost = "true";
         }
-        const parent = legalSection.parentElement;
-        if (parent && (host.parentElement !== parent || legalSection.nextElementSibling !== host)) {
-          legalSection.insertAdjacentElement("afterend", host);
+        const parent = financeSection.parentElement;
+        if (parent && (host.parentElement !== parent || financeSection.nextElementSibling !== host)) {
+          financeSection.insertAdjacentElement("afterend", host);
         }
         setMenuHost((current) => current === host ? current : host);
       }
