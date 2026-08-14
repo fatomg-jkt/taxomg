@@ -34,7 +34,7 @@ function findFinanceContent() {
 }
 
 function contentShell() {
-  return document.querySelector<HTMLElement>("main > div.min-h-screen") || document.querySelector<HTMLElement>("main");
+  return document.querySelector<HTMLElement>("main > div.min-h-screen");
 }
 
 export function PaymentRequestEnhancement() {
@@ -43,8 +43,7 @@ export function PaymentRequestEnhancement() {
   const [contentHost, setContentHost] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
-    let frame = 0;
-    let observer: MutationObserver | null = null;
+    let timer = 0;
 
     const navigate = () => {
       const url = new URL(window.location.href);
@@ -54,26 +53,25 @@ export function PaymentRequestEnhancement() {
     };
 
     const sync = () => {
-      const isActive = currentPage() === PAGE_ID;
-      setActive(isActive);
+      const aside = document.querySelector("aside");
+      const shell = contentShell();
+      const dashboardReady = Boolean(aside && shell);
+      const isActive = dashboardReady && currentPage() === PAGE_ID;
+      setActive((current) => current === isActive ? current : isActive);
+
+      if (!dashboardReady) {
+        setMenuHost((current) => current === null ? current : null);
+        setContentHost((current) => current === null ? current : null);
+        return;
+      }
 
       const nativePaymentButton = findSidebarButton(PAYMENT_LABEL);
-      const aside = document.querySelector("aside");
       const injectedHost = aside?.querySelector<HTMLElement>("[data-payment-request-menu-host]") || null;
 
       if (nativePaymentButton && !nativePaymentButton.closest("[data-payment-request-menu-host]")) {
         nativePaymentButton.dataset.paymentRequestNative = "true";
-        if (isActive) {
-          nativePaymentButton.style.backgroundColor = "#2563eb";
-          nativePaymentButton.style.color = "#ffffff";
-          nativePaymentButton.setAttribute("aria-current", "page");
-        } else {
-          nativePaymentButton.style.removeProperty("background-color");
-          nativePaymentButton.style.removeProperty("color");
-          nativePaymentButton.removeAttribute("aria-current");
-        }
-        injectedHost?.remove();
-        setMenuHost(null);
+        if (injectedHost?.isConnected) injectedHost.remove();
+        setMenuHost((current) => current === null ? current : null);
       } else {
         const financeContent = findFinanceContent();
         const cashflowButton = financeContent
@@ -86,29 +84,32 @@ export function PaymentRequestEnhancement() {
             host = document.createElement("div");
             host.dataset.paymentRequestMenuHost = "true";
           }
-          const cashflowWrapper = cashflowButton.parentElement;
-          if (cashflowWrapper?.parentElement && cashflowWrapper !== financeContent) cashflowWrapper.insertAdjacentElement("afterend", host);
-          else cashflowButton.insertAdjacentElement("afterend", host);
+
+          const wrapper = cashflowButton.parentElement;
+          const anchor = wrapper?.parentElement ? wrapper : cashflowButton;
+          const parent = anchor.parentElement;
+          if (parent && (host.parentElement !== parent || anchor.nextElementSibling !== host)) {
+            anchor.insertAdjacentElement("afterend", host);
+          }
           setMenuHost((current) => current === host ? current : host);
         }
       }
 
-      const shell = contentShell();
-      if (shell) {
-        let host = shell.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]");
-        if (!host) {
-          host = document.createElement("div");
-          host.dataset.paymentRequestContentHost = "true";
-          shell.appendChild(host);
-        }
-        setContentHost((current) => current === host ? current : host);
-
-        for (const child of Array.from(shell.children)) {
-          if (!(child instanceof HTMLElement) || child === host || child.tagName === "HEADER") continue;
-          child.style.display = isActive ? "none" : "";
-        }
-        host.style.display = isActive ? "block" : "none";
+      let host = shell!.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]");
+      if (!host) {
+        host = document.createElement("div");
+        host.dataset.paymentRequestContentHost = "true";
+        shell!.appendChild(host);
       }
+      setContentHost((current) => current === host ? current : host);
+
+      for (const child of Array.from(shell!.children)) {
+        if (!(child instanceof HTMLElement) || child === host || child.tagName === "HEADER") continue;
+        const wanted = isActive ? "none" : "";
+        if (child.style.display !== wanted) child.style.display = wanted;
+      }
+      const hostDisplay = isActive ? "block" : "none";
+      if (host.style.display !== hostDisplay) host.style.display = hostDisplay;
     };
 
     const onNavigation = () => sync();
@@ -133,29 +134,21 @@ export function PaymentRequestEnhancement() {
       window.dispatchEvent(new Event("payment-request-navigation"));
     }) as History["replaceState"];
 
-    frame = window.requestAnimationFrame(sync);
-    observer = new MutationObserver(sync);
-    observer.observe(document.body, { childList: true, subtree: true });
+    sync();
+    timer = window.setInterval(sync, 500);
     document.addEventListener("click", onSidebarClick, true);
     window.addEventListener("popstate", onNavigation);
+    window.addEventListener("focus", onNavigation);
     window.addEventListener("payment-request-navigation", onNavigation);
 
     return () => {
-      window.cancelAnimationFrame(frame);
-      observer?.disconnect();
+      window.clearInterval(timer);
       document.removeEventListener("click", onSidebarClick, true);
       window.removeEventListener("popstate", onNavigation);
+      window.removeEventListener("focus", onNavigation);
       window.removeEventListener("payment-request-navigation", onNavigation);
       window.history.pushState = originalPushState;
       window.history.replaceState = originalReplaceState;
-
-      const nativePaymentButton = findSidebarButton(PAYMENT_LABEL);
-      if (nativePaymentButton) {
-        nativePaymentButton.style.removeProperty("background-color");
-        nativePaymentButton.style.removeProperty("color");
-        nativePaymentButton.removeAttribute("aria-current");
-        delete nativePaymentButton.dataset.paymentRequestNative;
-      }
 
       const shell = contentShell();
       if (shell) {
