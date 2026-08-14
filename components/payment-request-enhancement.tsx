@@ -2,33 +2,28 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { ReceiptText } from "lucide-react";
 import { PaymentRequestDashboard } from "@/components/payment-request-dashboard";
 
 const PAGE_ID = "paymentRequest";
-const PAYMENT_LABEL = "Pengajuan Pembayaran";
+const PAYMENT_LABEL = "PENGAJUAN PEMBAYARAN";
 
 function currentPage() {
   if (typeof window === "undefined") return "";
   return new URLSearchParams(window.location.search).get("page") || "";
 }
 
-function findSidebarButton(label: string) {
+function findButton(label: string) {
   const aside = document.querySelector("aside");
   if (!aside) return null;
-  return Array.from(aside.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === label) || null;
+  return Array.from(aside.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim().toUpperCase() === label.toUpperCase()) || null;
 }
 
-function findFinanceContent() {
+function findSection(label: string) {
   const nav = document.querySelector("aside nav");
   if (!nav) return null;
-
-  for (const section of Array.from(nav.children)) {
-    if (!(section instanceof HTMLElement)) continue;
-    const header = section.firstElementChild;
-    const content = header?.nextElementSibling;
-    if (!(header instanceof HTMLElement) || !(content instanceof HTMLElement)) continue;
-    if (header.textContent?.trim().toUpperCase() === "DASHBOARD FINANCE") return content;
+  for (const child of Array.from(nav.children)) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (child.textContent?.toUpperCase().includes(label.toUpperCase())) return child;
   }
   return null;
 }
@@ -45,54 +40,42 @@ export function PaymentRequestEnhancement() {
   useEffect(() => {
     let timer = 0;
 
-    const navigate = () => {
-      const url = new URL(window.location.href);
-      url.searchParams.set("page", PAGE_ID);
-      window.history.pushState(null, "", url);
-      window.dispatchEvent(new Event("payment-request-navigation"));
-    };
-
     const sync = () => {
       const aside = document.querySelector("aside");
       const shell = contentShell();
-      const dashboardReady = Boolean(aside && shell);
-      const isActive = dashboardReady && currentPage() === PAGE_ID;
-      setActive((current) => current === isActive ? current : isActive);
+      const ready = Boolean(aside && shell);
+      const isActive = ready && currentPage() === PAGE_ID;
+      setActive(isActive);
 
-      if (!dashboardReady) {
-        setMenuHost((current) => current === null ? current : null);
-        setContentHost((current) => current === null ? current : null);
+      if (!ready) {
+        setMenuHost(null);
+        setContentHost(null);
         return;
       }
 
-      const nativePaymentButton = findSidebarButton(PAYMENT_LABEL);
-      const injectedHost = aside?.querySelector<HTMLElement>("[data-payment-request-menu-host]") || null;
-
-      if (nativePaymentButton && !nativePaymentButton.closest("[data-payment-request-menu-host]")) {
-        nativePaymentButton.dataset.paymentRequestNative = "true";
-        if (injectedHost?.isConnected) injectedHost.remove();
-        setMenuHost((current) => current === null ? current : null);
-      } else {
-        const financeContent = findFinanceContent();
-        const cashflowButton = financeContent
-          ? Array.from(financeContent.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "Cashflow") || null
-          : findSidebarButton("Cashflow");
-
-        if (cashflowButton) {
-          let host = aside?.querySelector<HTMLElement>("[data-payment-request-menu-host]") || null;
-          if (!host) {
-            host = document.createElement("div");
-            host.dataset.paymentRequestMenuHost = "true";
-          }
-
-          const wrapper = cashflowButton.parentElement;
-          const anchor = wrapper?.parentElement ? wrapper : cashflowButton;
-          const parent = anchor.parentElement;
-          if (parent && (host.parentElement !== parent || anchor.nextElementSibling !== host)) {
-            anchor.insertAdjacentElement("afterend", host);
-          }
-          setMenuHost((current) => current === host ? current : host);
+      const nativePaymentButton = findButton("Pengajuan Pembayaran");
+      if (nativePaymentButton && !nativePaymentButton.closest("[data-payment-request-dashboard-host]")) {
+        const nativeWrapper = nativePaymentButton.parentElement;
+        if (nativeWrapper instanceof HTMLElement) {
+          nativeWrapper.dataset.paymentRequestNativeWrapper = "true";
+          nativeWrapper.style.display = "none";
+        } else {
+          nativePaymentButton.style.display = "none";
         }
+      }
+
+      const legalSection = findSection("DASHBOARD LEGAL");
+      if (legalSection) {
+        let host = aside!.querySelector<HTMLElement>("[data-payment-request-dashboard-host]");
+        if (!host) {
+          host = document.createElement("div");
+          host.dataset.paymentRequestDashboardHost = "true";
+        }
+        const parent = legalSection.parentElement;
+        if (parent && (host.parentElement !== parent || legalSection.nextElementSibling !== host)) {
+          legalSection.insertAdjacentElement("afterend", host);
+        }
+        setMenuHost((current) => current === host ? current : host);
       }
 
       let host = shell!.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]");
@@ -105,24 +88,13 @@ export function PaymentRequestEnhancement() {
 
       for (const child of Array.from(shell!.children)) {
         if (!(child instanceof HTMLElement) || child === host || child.tagName === "HEADER") continue;
-        const wanted = isActive ? "none" : "";
-        if (child.style.display !== wanted) child.style.display = wanted;
+        const display = isActive ? "none" : "";
+        if (child.style.display !== display) child.style.display = display;
       }
-      const hostDisplay = isActive ? "block" : "none";
-      if (host.style.display !== hostDisplay) host.style.display = hostDisplay;
+      host.style.display = isActive ? "block" : "none";
     };
 
     const onNavigation = () => sync();
-    const onSidebarClick = (event: MouseEvent) => {
-      const target = event.target instanceof Element ? event.target.closest<HTMLButtonElement>("button") : null;
-      if (!target || target.closest("[data-payment-request-menu-host]")) return;
-      if (target.dataset.paymentRequestNative !== "true" && target.textContent?.trim() !== PAYMENT_LABEL) return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      navigate();
-    };
-
     const originalPushState = window.history.pushState.bind(window.history);
     const originalReplaceState = window.history.replaceState.bind(window.history);
     window.history.pushState = ((...args: Parameters<History["pushState"]>) => {
@@ -136,19 +108,20 @@ export function PaymentRequestEnhancement() {
 
     sync();
     timer = window.setInterval(sync, 500);
-    document.addEventListener("click", onSidebarClick, true);
     window.addEventListener("popstate", onNavigation);
     window.addEventListener("focus", onNavigation);
     window.addEventListener("payment-request-navigation", onNavigation);
 
     return () => {
       window.clearInterval(timer);
-      document.removeEventListener("click", onSidebarClick, true);
       window.removeEventListener("popstate", onNavigation);
       window.removeEventListener("focus", onNavigation);
       window.removeEventListener("payment-request-navigation", onNavigation);
       window.history.pushState = originalPushState;
       window.history.replaceState = originalReplaceState;
+
+      const hiddenWrapper = document.querySelector<HTMLElement>("[data-payment-request-native-wrapper]");
+      if (hiddenWrapper) hiddenWrapper.style.display = "";
 
       const shell = contentShell();
       if (shell) {
@@ -171,10 +144,9 @@ export function PaymentRequestEnhancement() {
     {menuHost ? createPortal(
       <button
         onClick={navigate}
-        className={`flex w-full items-center gap-3 rounded-2xl px-4 py-2.5 text-left text-sm font-semibold transition ${active ? "bg-blue-600 text-white shadow-lg shadow-blue-600/25" : "text-slate-300 hover:bg-white/10 hover:text-white"}`}
+        className={`mb-4 mt-4 flex w-full items-center rounded-xl border px-4 py-2.5 text-left text-[12px] font-extrabold uppercase tracking-[0.16em] transition ${active ? "border-blue-400 bg-blue-600 text-white shadow-lg shadow-blue-600/20" : "border-blue-400/40 bg-blue-500/10 text-blue-100 hover:bg-blue-500/20"}`}
       >
-        <ReceiptText className="h-5 w-5 shrink-0" />
-        <span>{PAYMENT_LABEL}</span>
+        {PAYMENT_LABEL}
       </button>,
       menuHost,
     ) : null}
