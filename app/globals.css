@@ -49,9 +49,43 @@
   }
 
   * { @apply border-border; }
-  body { @apply bg-background text-foreground antialiased; font-family: var(--font-body); }
-  button, input, select, textarea, table { font-family: inherit; }
-  h1, h2, h3, h4, h5, h6, [role="heading"] { font-family: var(--font-title); }
+
+  html,
+  body {
+    font-family: var(--font-body) !important;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+
+  body * {
+    font-family: var(--font-body) !important;
+  }
+
+  body h1,
+  body h2,
+  body h3,
+  body h4,
+  body h5,
+  body h6,
+  body [role="heading"],
+  body .font-serif {
+    font-family: var(--font-title) !important;
+  }
+
+  body svg text,
+  body svg tspan,
+  body .recharts-text,
+  body .recharts-legend-item-text,
+  body .recharts-tooltip-wrapper {
+    font-family: var(--font-body) !important;
+  }
+
+  body input::placeholder,
+  body textarea::placeholder {
+    font-family: var(--font-body) !important;
+  }
 }
 
 .dashboard-grid {
