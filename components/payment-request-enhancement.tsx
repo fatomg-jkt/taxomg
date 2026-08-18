@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PaymentRequestDashboard } from "@/components/payment-request-dashboard";
 
@@ -37,10 +37,21 @@ function contentShell() {
   return document.querySelector<HTMLElement>("main > div.min-h-screen");
 }
 
+function restorePaymentHiddenContent(shell: HTMLElement, host: HTMLElement | null) {
+  for (const child of Array.from(shell.children)) {
+    if (!(child instanceof HTMLElement) || child === host || child.tagName === "HEADER") continue;
+    if (child.dataset.paymentRequestHidden !== "true") continue;
+    child.style.display = child.dataset.paymentRequestPreviousDisplay || "";
+    delete child.dataset.paymentRequestHidden;
+    delete child.dataset.paymentRequestPreviousDisplay;
+  }
+}
+
 export function PaymentRequestEnhancement() {
   const [active, setActive] = useState(false);
   const [menuHost, setMenuHost] = useState<HTMLElement | null>(null);
   const [contentHost, setContentHost] = useState<HTMLElement | null>(null);
+  const wasActiveRef = useRef(false);
 
   useEffect(() => {
     let timer = 0;
@@ -56,6 +67,7 @@ export function PaymentRequestEnhancement() {
       if (!ready) {
         setMenuHost(null);
         setContentHost(null);
+        wasActiveRef.current = false;
         return;
       }
 
@@ -96,12 +108,22 @@ export function PaymentRequestEnhancement() {
       }
       setContentHost((current) => current === host ? current : host);
 
-      for (const child of Array.from(shell!.children)) {
-        if (!(child instanceof HTMLElement) || child === host || child.tagName === "HEADER") continue;
-        const display = isActive ? "none" : "";
-        if (child.style.display !== display) child.style.display = display;
+      if (isActive) {
+        for (const child of Array.from(shell!.children)) {
+          if (!(child instanceof HTMLElement) || child === host || child.tagName === "HEADER") continue;
+          if (child.dataset.paymentRequestHidden !== "true") {
+            child.dataset.paymentRequestPreviousDisplay = child.style.display;
+            child.dataset.paymentRequestHidden = "true";
+          }
+          if (child.style.display !== "none") child.style.display = "none";
+        }
+        host.style.display = "block";
+      } else {
+        if (wasActiveRef.current) restorePaymentHiddenContent(shell!, host);
+        host.style.display = "none";
       }
-      host.style.display = isActive ? "block" : "none";
+
+      wasActiveRef.current = isActive;
     };
 
     const onNavigation = () => sync();
@@ -142,9 +164,7 @@ export function PaymentRequestEnhancement() {
       const shell = contentShell();
       if (shell) {
         const host = shell.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]");
-        for (const child of Array.from(shell.children)) {
-          if (child instanceof HTMLElement && child !== host && child.tagName !== "HEADER") child.style.display = "";
-        }
+        restorePaymentHiddenContent(shell, host);
       }
     };
   }, []);
