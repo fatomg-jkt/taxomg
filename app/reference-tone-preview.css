@@ -33,32 +33,38 @@ main {
     radial-gradient(circle at 37% 28%, rgb(255 250 238 / 0.78), transparent 32rem) !important;
 }
 
+/* Preview sidebar: light blue sampled from the supplied reference image. */
 main > aside {
-  background: #560f14 !important;
-  border-right: 1px solid rgb(255 255 255 / 0.08);
+  background: #b4d3ef !important;
+  border-right: 1px solid #9fc4e5;
 }
 
 main > aside nav > div > p,
 main > aside [class*="bg-blue-500/10"] {
-  background: rgb(255 255 255 / 0.055) !important;
-  border-color: rgb(240 200 195 / 0.22) !important;
-  color: #e8c5c1 !important;
+  background: rgb(255 255 255 / 0.28) !important;
+  border-color: rgb(36 68 95 / 0.16) !important;
+  color: #24445f !important;
 }
 
 main > aside button:not([class*="bg-blue-600"]) {
-  color: #d7c4c2;
+  color: #294861;
 }
 
 main > aside button:not([class*="bg-blue-600"]):hover {
-  background: rgb(255 255 255 / 0.08) !important;
-  color: #fff8ee !important;
+  background: rgb(255 255 255 / 0.34) !important;
+  color: #0f172a !important;
 }
 
 main > aside button[class*="bg-blue-600"],
 main > aside button[aria-expanded="true"][class*="bg-blue-600"] {
-  background: #761a20 !important;
-  color: #fff8ee !important;
-  box-shadow: 0 12px 30px rgb(36 3 6 / 0.28) !important;
+  background: #78aeda !important;
+  color: #0f172a !important;
+  box-shadow: 0 12px 30px rgb(46 91 127 / 0.18) !important;
+}
+
+main > aside .text-white,
+main > aside button.text-white {
+  color: #0f172a !important;
 }
 
 main > div.min-h-screen > header {
