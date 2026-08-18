@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800;900&family=Public+Sans:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -22,6 +24,8 @@
     --input: 214 32% 88%;
     --ring: 222 88% 56%;
     --radius: 1rem;
+    --font-title: 'Playfair Display', Georgia, 'Times New Roman', serif;
+    --font-body: 'Public Sans', Arial, Helvetica, sans-serif;
   }
 
   .dark {
@@ -45,7 +49,9 @@
   }
 
   * { @apply border-border; }
-  body { @apply bg-background text-foreground antialiased; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  body { @apply bg-background text-foreground antialiased; font-family: var(--font-body); }
+  button, input, select, textarea, table { font-family: inherit; }
+  h1, h2, h3, h4, h5, h6, [role="heading"] { font-family: var(--font-title); }
 }
 
 .dashboard-grid {
@@ -92,14 +98,6 @@ section[class~="xl:grid-cols-5"] > div:nth-child(2) .recharts-bar-rectangle path
 section[class~="xl:grid-cols-5"] > div:nth-child(2) .recharts-legend-item-text {
   font-weight: 600;
   color: #334155 !important;
-}
-
-/* Control Omzet: Arial only on this page. */
-main:has(table.w-max.min-w-full.border-separate) {
-  font-family: Arial, Helvetica, sans-serif !important;
-}
-main:has(table.w-max.min-w-full.border-separate) * {
-  font-family: Arial, Helvetica, sans-serif !important;
 }
 
 /* Control Omzet table group colors: 1001 pink, Obsidian blue, Resto green, Management purple. */
