@@ -16,8 +16,13 @@ type StoredUser = {
   passwordHash: string;
 };
 
-function normalizeEmail(value: unknown) {
-  return String(value ?? "").trim().toLowerCase();
+function normalizeUserId(value: unknown) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return normalized.endsWith("@company.com") ? normalized.slice(0, -"@company.com".length) : normalized;
+}
+
+function isValidUserId(value: string) {
+  return /^[a-z0-9._-]{2,50}$/.test(value);
 }
 
 function passwordHash(password: string, salt: string) {
@@ -29,7 +34,7 @@ function makeStoredUser(user: { id?: string; name: string; email: string; role: 
   return {
     id: user.id || crypto.randomUUID(),
     name: String(user.name || "User").trim() || "User",
-    email: normalizeEmail(user.email),
+    email: normalizeUserId(user.email),
     role: user.role,
     salt,
     passwordHash: passwordHash(user.password, salt),
@@ -38,6 +43,10 @@ function makeStoredUser(user: { id?: string; name: string; email: string; role: 
 
 function defaultUsers(): StoredUser[] {
   return USER_ACCESS.map((user) => makeStoredUser(user));
+}
+
+function normalizeStoredUsers(users: StoredUser[]) {
+  return users.map((user) => ({ ...user, email: normalizeUserId(user.email) }));
 }
 
 async function loadUsers(): Promise<StoredUser[]> {
@@ -49,7 +58,7 @@ async function loadUsers(): Promise<StoredUser[]> {
     const text = await new Response(result.stream).text();
     const payload = JSON.parse(text);
     if (!Array.isArray(payload?.users) || !payload.users.length) return defaultUsers();
-    return payload.users.filter((user: StoredUser) => user && user.email && user.passwordHash && user.salt && roles.includes(user.role));
+    return normalizeStoredUsers(payload.users.filter((user: StoredUser) => user && user.email && user.passwordHash && user.salt && roles.includes(user.role)));
   } catch {
     return defaultUsers();
   }
@@ -68,7 +77,7 @@ async function saveUsers(users: StoredUser[]) {
 }
 
 function publicUsers(users: StoredUser[]) {
-  return users.map(({ id, name, email, role }) => ({ id, name, email, role }));
+  return users.map(({ id, name, email, role }) => ({ id, name, email: normalizeUserId(email), role }));
 }
 
 function checkPassword(user: StoredUser | undefined, password: string) {
@@ -88,17 +97,17 @@ export async function POST(request: Request) {
   const users = await loadUsers();
 
   if (body.action === "login") {
-    const email = normalizeEmail(body.email);
-    const user = users.find((item) => item.email === email);
+    const email = normalizeUserId(body.email);
+    const user = users.find((item) => normalizeUserId(item.email) === email);
     if (!checkPassword(user, String(body.password ?? ""))) {
       return NextResponse.json({ ok: false, error: "User ID atau password salah." }, { status: 401, headers: noStoreHeaders });
     }
-    return NextResponse.json({ ok: true, user: { id: user!.id, name: user!.name, email: user!.email, role: user!.role } }, { headers: noStoreHeaders });
+    return NextResponse.json({ ok: true, user: { id: user!.id, name: user!.name, email: normalizeUserId(user!.email), role: user!.role } }, { headers: noStoreHeaders });
   }
 
   if (body.action === "save") {
-    const actorEmail = normalizeEmail(body.actorEmail);
-    const actor = users.find((item) => item.email === actorEmail);
+    const actorEmail = normalizeUserId(body.actorEmail);
+    const actor = users.find((item) => normalizeUserId(item.email) === actorEmail);
     if (!checkPassword(actor, String(body.actorPassword ?? "")) || !actor || !["OWNER", "SUPER_ADMIN"].includes(actor.role)) {
       return NextResponse.json({ ok: false, error: "Hanya Owner/Super Admin dengan password yang valid yang dapat mengubah user." }, { status: 403, headers: noStoreHeaders });
     }
@@ -109,13 +118,13 @@ export async function POST(request: Request) {
     const emails = new Set<string>();
     const nextUsers: StoredUser[] = [];
     for (const draft of body.users) {
-      const email = normalizeEmail(draft.email);
+      const email = normalizeUserId(draft.email);
       const role = draft.role as UserRole;
-      if (!email || !email.includes("@") || emails.has(email) || !roles.includes(role)) {
-        return NextResponse.json({ ok: false, error: "Pastikan User ID unik, berupa email valid, dan role tersedia." }, { status: 400, headers: noStoreHeaders });
+      if (!email || !isValidUserId(email) || emails.has(email) || !roles.includes(role)) {
+        return NextResponse.json({ ok: false, error: "Pastikan User ID unik, 2-50 karakter, dan hanya memakai huruf, angka, titik, garis bawah, atau tanda minus." }, { status: 400, headers: noStoreHeaders });
       }
       emails.add(email);
-      const existing = users.find((item) => item.id === draft.id || item.email === email);
+      const existing = users.find((item) => item.id === draft.id || normalizeUserId(item.email) === email);
       const password = String(draft.password ?? "");
       if (!existing && password.length < 6) {
         return NextResponse.json({ ok: false, error: `Password untuk ${email} minimal 6 karakter.` }, { status: 400, headers: noStoreHeaders });
