@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { PaymentRequestDashboard } from "@/components/payment-request-dashboard";
 
@@ -26,7 +26,7 @@ function hideNativePaymentButtons() {
   const aside = document.querySelector("aside");
   if (!aside) return;
   for (const button of Array.from(aside.querySelectorAll<HTMLButtonElement>("button"))) {
-    const matches = button.textContent?.trim().toUpperCase() === "PENGAJUAN PEMBAYARAN";
+    const matches = button.textContent?.trim().toUpperCase() === PAYMENT_LABEL;
     if (!matches || button.closest("[data-payment-request-dashboard-host]")) continue;
     button.dataset.paymentRequestNativeButton = "true";
     button.style.display = "none";
@@ -37,37 +37,44 @@ function contentShell() {
   return document.querySelector<HTMLElement>("main > div.min-h-screen");
 }
 
-function restorePaymentHiddenContent(shell: HTMLElement, host: HTMLElement | null) {
+function setContentVisibility(shell: HTMLElement, host: HTMLElement, isActive: boolean) {
   for (const child of Array.from(shell.children)) {
     if (!(child instanceof HTMLElement) || child === host || child.tagName === "HEADER") continue;
-    if (child.dataset.paymentRequestHidden !== "true") continue;
-    child.style.display = child.dataset.paymentRequestPreviousDisplay || "";
-    delete child.dataset.paymentRequestHidden;
-    delete child.dataset.paymentRequestPreviousDisplay;
+
+    if (isActive) {
+      if (child.dataset.paymentRequestHidden !== "true") {
+        child.dataset.paymentRequestPreviousDisplay = child.style.display;
+        child.dataset.paymentRequestHidden = "true";
+      }
+      child.hidden = true;
+    } else if (child.dataset.paymentRequestHidden === "true") {
+      child.hidden = false;
+      child.style.display = child.dataset.paymentRequestPreviousDisplay || "";
+      delete child.dataset.paymentRequestHidden;
+      delete child.dataset.paymentRequestPreviousDisplay;
+    }
   }
+
+  host.hidden = !isActive;
 }
 
 export function PaymentRequestEnhancement() {
   const [active, setActive] = useState(false);
   const [menuHost, setMenuHost] = useState<HTMLElement | null>(null);
   const [contentHost, setContentHost] = useState<HTMLElement | null>(null);
-  const wasActiveRef = useRef(false);
 
   useEffect(() => {
-    let timer = 0;
     let observer: MutationObserver | null = null;
+    let scheduled = 0;
 
     const sync = () => {
+      scheduled = 0;
       const aside = document.querySelector("aside");
       const shell = contentShell();
-      const ready = Boolean(aside && shell);
-      const isActive = ready && currentPage() === PAGE_ID;
-      setActive(isActive);
-
-      if (!ready) {
+      if (!aside || !shell) {
+        setActive(false);
         setMenuHost(null);
         setContentHost(null);
-        wasActiveRef.current = false;
         return;
       }
 
@@ -79,16 +86,12 @@ export function PaymentRequestEnhancement() {
       const financeSection = findSection("DASHBOARD FINANCE");
 
       if (nav && taxSection && legalSection && financeSection) {
-        if (taxSection.nextElementSibling !== legalSection) {
-          taxSection.insertAdjacentElement("afterend", legalSection);
-        }
-        if (legalSection.nextElementSibling !== financeSection) {
-          legalSection.insertAdjacentElement("afterend", financeSection);
-        }
+        if (taxSection.nextElementSibling !== legalSection) taxSection.insertAdjacentElement("afterend", legalSection);
+        if (legalSection.nextElementSibling !== financeSection) legalSection.insertAdjacentElement("afterend", financeSection);
       }
 
       if (financeSection) {
-        let host = aside!.querySelector<HTMLElement>("[data-payment-request-dashboard-host]");
+        let host = aside.querySelector<HTMLElement>("[data-payment-request-dashboard-host]");
         if (!host) {
           host = document.createElement("div");
           host.dataset.paymentRequestDashboardHost = "true";
@@ -100,35 +103,29 @@ export function PaymentRequestEnhancement() {
         setMenuHost((current) => current === host ? current : host);
       }
 
-      let host = shell!.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]");
+      let host = shell.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]");
       if (!host) {
         host = document.createElement("div");
         host.dataset.paymentRequestContentHost = "true";
-        shell!.appendChild(host);
+        host.hidden = true;
+        shell.appendChild(host);
       }
       setContentHost((current) => current === host ? current : host);
 
-      if (isActive) {
-        for (const child of Array.from(shell!.children)) {
-          if (!(child instanceof HTMLElement) || child === host || child.tagName === "HEADER") continue;
-          if (child.dataset.paymentRequestHidden !== "true") {
-            child.dataset.paymentRequestPreviousDisplay = child.style.display;
-            child.dataset.paymentRequestHidden = "true";
-          }
-          if (child.style.display !== "none") child.style.display = "none";
-        }
-        host.style.display = "block";
-      } else {
-        if (wasActiveRef.current) restorePaymentHiddenContent(shell!, host);
-        host.style.display = "none";
-      }
-
-      wasActiveRef.current = isActive;
+      const isActive = currentPage() === PAGE_ID;
+      setActive(isActive);
+      setContentVisibility(shell, host, isActive);
     };
 
-    const onNavigation = () => sync();
+    const scheduleSync = () => {
+      if (scheduled) return;
+      scheduled = window.requestAnimationFrame(sync);
+    };
+
+    const onNavigation = () => scheduleSync();
     const originalPushState = window.history.pushState.bind(window.history);
     const originalReplaceState = window.history.replaceState.bind(window.history);
+
     window.history.pushState = ((...args: Parameters<History["pushState"]>) => {
       originalPushState(...args);
       window.dispatchEvent(new Event("payment-request-navigation"));
@@ -139,41 +136,40 @@ export function PaymentRequestEnhancement() {
     }) as History["replaceState"];
 
     sync();
-    timer = window.setInterval(sync, 500);
+
     observer = new MutationObserver(() => {
       hideNativePaymentButtons();
+      scheduleSync();
     });
     observer.observe(document.body, { childList: true, subtree: true });
+
     window.addEventListener("popstate", onNavigation);
-    window.addEventListener("focus", onNavigation);
     window.addEventListener("payment-request-navigation", onNavigation);
 
     return () => {
-      window.clearInterval(timer);
+      if (scheduled) window.cancelAnimationFrame(scheduled);
       observer?.disconnect();
       window.removeEventListener("popstate", onNavigation);
-      window.removeEventListener("focus", onNavigation);
       window.removeEventListener("payment-request-navigation", onNavigation);
       window.history.pushState = originalPushState;
       window.history.replaceState = originalReplaceState;
 
       for (const hiddenButton of Array.from(document.querySelectorAll<HTMLButtonElement>("button[data-payment-request-native-button]"))) {
         hiddenButton.style.display = "";
+        delete hiddenButton.dataset.paymentRequestNativeButton;
       }
 
       const shell = contentShell();
-      if (shell) {
-        const host = shell.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]");
-        restorePaymentHiddenContent(shell, host);
-      }
+      const host = shell?.querySelector<HTMLElement>(":scope > [data-payment-request-content-host]") ?? null;
+      if (shell && host) setContentVisibility(shell, host, false);
     };
   }, []);
 
   function navigate() {
+    if (currentPage() === PAGE_ID) return;
     const url = new URL(window.location.href);
     url.searchParams.set("page", PAGE_ID);
     window.history.pushState(null, "", url);
-    window.dispatchEvent(new Event("payment-request-navigation"));
   }
 
   return <>
