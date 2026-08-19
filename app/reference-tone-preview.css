@@ -1,38 +1,4 @@
-/* Preview-only adjustments. Production colors, layout, data, and behavior stay untouched. */
-
-/* Keep the dashboard/main background exactly as the original. Only the sidebar color is previewed in light blue. */
-main > aside {
-  background: #b4d3ef !important;
-  border-right: 1px solid #9fc4e5;
-}
-
-main > aside nav > div > p,
-main > aside [class*="bg-blue-500/10"] {
-  background: rgb(255 255 255 / 0.28) !important;
-  border-color: rgb(36 68 95 / 0.16) !important;
-  color: #24445f !important;
-}
-
-main > aside button:not([class*="bg-blue-600"]) {
-  color: #294861;
-}
-
-main > aside button:not([class*="bg-blue-600"]):hover {
-  background: rgb(255 255 255 / 0.34) !important;
-  color: #0f172a !important;
-}
-
-main > aside button[class*="bg-blue-600"],
-main > aside button[aria-expanded="true"][class*="bg-blue-600"] {
-  background: #78aeda !important;
-  color: #0f172a !important;
-  box-shadow: 0 12px 30px rgb(46 91 127 / 0.18) !important;
-}
-
-main > aside .text-white,
-main > aside button.text-white {
-  color: #0f172a !important;
-}
+/* Preview branding adjustments only. Keep the original dashboard palette and dark navy sidebar. */
 
 /* Preview branding: remove the OMG logo and replace it with the requested dashboard name. */
 main img[alt="OMG - Obsidian Management Group"] {
@@ -55,7 +21,7 @@ main.dashboard-grid section > div.mb-8.flex.items-center.gap-4::after {
   color: #121a29;
 }
 
-/* Sidebar branding: same two-line treatment. */
+/* Sidebar branding: restore the original dark navy sidebar and use light text for contrast. */
 main > aside > div.relative.mb-5.flex.justify-center > div.flex.w-full.flex-col.items-center::after {
   content: "Dashboard Finance, Tax & Legal\A Kantor Kencana";
   display: block;
@@ -66,5 +32,5 @@ main > aside > div.relative.mb-5.flex.justify-center > div.flex.w-full.flex-col.
   font-size: 0.88rem;
   font-weight: 700;
   line-height: 1.3;
-  color: #0f172a;
+  color: #e2e8f0;
 }
