@@ -129,7 +129,7 @@ export function DashboardAuth() {
             autoFocus
             value={userId}
             onChange={(event) => { setUserId(normalizeEmail(event.target.value)); setError(""); }}
-            placeholder="owner"
+            placeholder="user"
             className="h-12 rounded-2xl bg-white"
           />
         </div>
