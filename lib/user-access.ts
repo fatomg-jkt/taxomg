@@ -11,10 +11,10 @@ export type UserDirectoryEntry = Omit<UserAccess, "password"> & { id?: string };
 
 // Konfigurasi akun default. Perubahan dari menu Pengaturan User disimpan terpisah di cloud.
 export const USER_ACCESS: readonly UserAccess[] = [
-  { name: "Owner", email: "owner@company.com", password: "owner123", role: "OWNER" },
-  { name: "Super Admin", email: "superadmin@company.com", password: "superadmin123", role: "SUPER_ADMIN" },
-  { name: "Tax", email: "tax@company.com", password: "tax123", role: "TAX_USER" },
-  { name: "Finance", email: "finance@company.com", password: "finance123", role: "FINANCE_USER" },
+  { name: "Owner", email: "owner", password: "owner123", role: "OWNER" },
+  { name: "Super Admin", email: "superadmin", password: "superadmin123", role: "SUPER_ADMIN" },
+  { name: "Tax", email: "tax", password: "tax123", role: "TAX_USER" },
+  { name: "Finance", email: "finance", password: "finance123", role: "FINANCE_USER" },
 ] as const;
 
 export type DashboardArea = "tax" | "finance" | "legal";
@@ -23,7 +23,8 @@ export const AUTH_STORAGE_KEY = "authSession";
 export const USER_DIRECTORY_STORAGE_KEY = "taxomg-user-directory-v1";
 
 export function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
+  const normalized = email.trim().toLowerCase();
+  return normalized.endsWith("@company.com") ? normalized.slice(0, -"@company.com".length) : normalized;
 }
 
 function cachedDirectory(): UserDirectoryEntry[] {
@@ -41,7 +42,7 @@ function cachedDirectory(): UserDirectoryEntry[] {
 export function getUserByEmail(email: string) {
   const normalizedEmail = normalizeEmail(email);
   const cached = cachedDirectory().find((user) => normalizeEmail(user.email) === normalizedEmail);
-  if (cached) return { ...cached, password: "" } satisfies UserAccess;
+  if (cached) return { ...cached, email: normalizeEmail(cached.email), password: "" } satisfies UserAccess;
   return USER_ACCESS.find((user) => normalizeEmail(user.email) === normalizedEmail) ?? null;
 }
 
