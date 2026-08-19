@@ -111,6 +111,7 @@ function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
 
   const trigger = document.createElement("button");
   trigger.type = "button";
+  trigger.dataset.taxExcelGenerated = "true";
   trigger.className = nativeUpload.className;
   trigger.setAttribute("aria-haspopup", "menu");
   trigger.setAttribute("aria-expanded", "false");
@@ -122,12 +123,14 @@ function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
 
   const uploadItem = document.createElement("button");
   uploadItem.type = "button";
+  uploadItem.dataset.taxExcelGenerated = "true";
   uploadItem.setAttribute("role", "menuitem");
   uploadItem.className = "flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-100";
   uploadItem.textContent = "Upload Excel";
 
   const downloadItem = document.createElement("button");
   downloadItem.type = "button";
+  downloadItem.dataset.taxExcelGenerated = "true";
   downloadItem.setAttribute("role", "menuitem");
   downloadItem.className = "flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-100";
   downloadItem.textContent = "Download Template Excel";
@@ -145,20 +148,21 @@ function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
 
   uploadItem.addEventListener("click", (event) => {
     event.preventDefault();
+    event.stopPropagation();
     setOpen(false);
     nativeUpload.click();
   });
 
   downloadItem.addEventListener("click", (event) => {
     event.preventDefault();
+    event.stopPropagation();
     setOpen(false);
     downloadTemplate(page);
   });
 
-  wrapper.append(trigger, menu);
   menu.append(uploadItem, downloadItem);
+  wrapper.append(trigger, menu);
   nativeUpload.insertAdjacentElement("afterend", wrapper);
-  return wrapper;
 }
 
 export function TaxExcelActionsEnhancement() {
@@ -189,6 +193,7 @@ export function TaxExcelActionsEnhancement() {
         }
 
         for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("main button"))) {
+          if (button.dataset.taxExcelGenerated === "true" || button.closest("[data-tax-excel-actions='true']")) continue;
           if (isManualCreateButton(button)) {
             button.dataset.taxManualHidden = "true";
             button.style.setProperty("display", "none", "important");
@@ -196,6 +201,7 @@ export function TaxExcelActionsEnhancement() {
         }
 
         for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("main button"))) {
+          if (button.dataset.taxExcelGenerated === "true" || button.closest("[data-tax-excel-actions='true']")) continue;
           if (normalizeText(button.textContent) !== "UPLOAD EXCEL") continue;
           if (button.dataset.taxNativeUpload === "true") continue;
           button.dataset.taxNativeUpload = "true";
