@@ -198,4 +198,37 @@ main .recharts-tooltip-wrapper > div {
   border-color: #d8ccbd !important;
 }
 
+/* Preview branding: remove the OMG logo and replace it with the requested dashboard name. */
+main img[alt="OMG - Obsidian Management Group"] {
+  display: none !important;
+}
+
+main.dashboard-grid section > div.mb-8.flex.items-center.gap-4 > div {
+  display: none !important;
+}
+
+main.dashboard-grid section > div.mb-8.flex.items-center.gap-4::after {
+  content: "Dashboard Finance, Tax & Legal Kantor Kencana";
+  display: block;
+  max-width: 20rem;
+  font-family: var(--font-title) !important;
+  font-size: 1.65rem;
+  font-weight: 700;
+  line-height: 1.15;
+  color: #121a29;
+}
+
+main > aside > div.relative.mb-5.flex.justify-center > div.flex.w-full.flex-col.items-center::after {
+  content: "Dashboard Finance, Tax & Legal Kantor Kencana";
+  display: block;
+  margin-top: 0.75rem;
+  max-width: 13rem;
+  text-align: center;
+  font-family: var(--font-title) !important;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: #0f172a;
+}
+
 /* Preserve semantic success/warning/error colors and existing chart series colors. */
