@@ -15,7 +15,7 @@ main.dashboard-grid section > div.mb-8.flex.items-center.gap-4 > div {
   display: none !important;
 }
 
-/* Login branding: use the same simple navy card as the sidebar. */
+/* Login branding: white background with black text. */
 main.dashboard-grid section > div.mb-8.flex.items-center.gap-4 {
   margin-bottom: 1cm !important;
 }
@@ -36,11 +36,11 @@ main.dashboard-grid section > div.mb-8.flex.items-center.gap-4::after {
   font-size: 1.15rem;
   font-weight: 700;
   line-height: 1.3;
-  color: #f8fafc;
-  border: 1px solid rgb(59 130 246 / 0.55);
+  color: #000000;
+  border: 1px solid #e2e8f0;
   border-radius: 1rem;
-  background: #061126;
-  box-shadow: 0 10px 24px rgb(2 6 23 / 0.16);
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 0.08);
   text-shadow: none;
 }
 
