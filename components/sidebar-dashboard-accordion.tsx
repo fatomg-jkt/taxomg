@@ -6,97 +6,114 @@ const TOP_LEVEL_LABELS = ["DASHBOARD TAX", "DASHBOARD LEGAL", "DASHBOARD FINANCE
 const STANDALONE_LABEL = "PENGAJUAN PEMBAYARAN";
 type TopLevelLabel = (typeof TOP_LEVEL_LABELS)[number];
 
-function buttonLabel(button: HTMLButtonElement) {
-  return (button.textContent || "").replace(/\s+/g, " ").trim().toUpperCase();
+type Section = {
+  label: TopLevelLabel;
+  header: HTMLElement;
+  body: HTMLElement;
+};
+
+function normalizeLabel(value: string | null | undefined) {
+  return (value || "").replace(/\s+/g, " ").trim().toUpperCase();
 }
 
-function topLevelButtons() {
-  const aside = document.querySelector("aside");
-  if (!aside) return [] as HTMLButtonElement[];
-  return Array.from(aside.querySelectorAll<HTMLButtonElement>("button")).filter((button) =>
-    TOP_LEVEL_LABELS.some((label) => buttonLabel(button) === label),
-  );
+function getSections(): Section[] {
+  const nav = document.querySelector("aside nav");
+  if (!nav) return [];
+
+  return Array.from(nav.children).flatMap((node) => {
+    if (!(node instanceof HTMLElement)) return [];
+    const header = node.firstElementChild;
+    const body = header?.nextElementSibling;
+    if (!(header instanceof HTMLElement) || !(body instanceof HTMLElement)) return [];
+    const label = normalizeLabel(header.textContent);
+    if (!TOP_LEVEL_LABELS.includes(label as TopLevelLabel)) return [];
+    return [{ label: label as TopLevelLabel, header, body }];
+  });
 }
 
 export function SidebarDashboardAccordion() {
   useEffect(() => {
-    let frame = 0;
     let openLabel: TopLevelLabel | null = null;
+    let frame = 0;
     let applying = false;
-    let initialized = false;
 
-    const enforceState = () => {
+    const applyState = () => {
       if (applying) return;
-      const buttons = topLevelButtons();
-      if (!buttons.length) return;
+      const sections = getSections();
+      if (!sections.length) return;
 
       applying = true;
       try {
-        // Saat pertama kali sidebar muncul, semua submenu wajib tertutup.
-        // Submenu baru boleh terbuka setelah parent Dashboard diklik user.
-        if (!initialized) {
-          for (const button of buttons) {
-            if (button.getAttribute("aria-expanded") === "true") button.click();
-          }
-          openLabel = null;
-          initialized = true;
-          return;
-        }
-
-        for (const button of buttons) {
-          const label = buttonLabel(button) as TopLevelLabel;
-          const shouldOpen = openLabel === label;
-          const isOpen = button.getAttribute("aria-expanded") === "true";
-          if (isOpen !== shouldOpen) button.click();
+        for (const section of sections) {
+          const expanded = openLabel === section.label;
+          section.header.setAttribute("role", "button");
+          section.header.setAttribute("tabindex", "0");
+          section.header.setAttribute("aria-expanded", String(expanded));
+          section.header.style.cursor = "pointer";
+          section.header.style.userSelect = "none";
+          section.body.hidden = !expanded;
         }
       } finally {
         applying = false;
       }
     };
 
+    const toggleHeader = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      const header = target.closest("aside nav > div > p");
+      if (!(header instanceof HTMLElement)) return false;
+      const label = normalizeLabel(header.textContent);
+      if (!TOP_LEVEL_LABELS.includes(label as TopLevelLabel)) return false;
+
+      const clicked = label as TopLevelLabel;
+      openLabel = openLabel === clicked ? null : clicked;
+      applyState();
+      return true;
+    };
+
     const onClick = (event: MouseEvent) => {
-      if (applying) return;
+      if (toggleHeader(event.target)) return;
+
       const target = event.target;
       if (!(target instanceof Element)) return;
       const button = target.closest("aside button");
       if (!(button instanceof HTMLButtonElement)) return;
-      const label = buttonLabel(button);
+      if (normalizeLabel(button.textContent) !== STANDALONE_LABEL) return;
 
-      if (TOP_LEVEL_LABELS.includes(label as TopLevelLabel)) {
-        const clickedLabel = label as TopLevelLabel;
-        // Native Sidebar tetap menangani buka/tutup parent yang diklik.
-        // Setelah React selesai update, sinkronkan state dan tutup parent lain.
-        window.cancelAnimationFrame(frame);
-        frame = window.requestAnimationFrame(() => {
-          const current = topLevelButtons().find((item) => buttonLabel(item) === clickedLabel);
-          openLabel = current?.getAttribute("aria-expanded") === "true" ? clickedLabel : null;
-          enforceState();
-        });
-        return;
-      }
+      openLabel = null;
+      applyState();
+    };
 
-      if (label === STANDALONE_LABEL) {
-        openLabel = null;
-        window.cancelAnimationFrame(frame);
-        frame = window.requestAnimationFrame(enforceState);
-      }
-      // Klik anak submenu sengaja tidak mengubah openLabel,
-      // jadi parent yang sedang aktif tetap terbuka.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      if (toggleHeader(event.target)) event.preventDefault();
     };
 
     const observer = new MutationObserver(() => {
       window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(enforceState);
+      frame = window.requestAnimationFrame(applyState);
     });
 
-    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["aria-expanded"] });
+    // Default: seluruh isi Dashboard Tax/Legal/Finance disembunyikan.
+    // Isi baru muncul setelah judul Dashboard terkait diklik.
+    frame = window.requestAnimationFrame(applyState);
+    observer.observe(document.body, { childList: true, subtree: true });
     document.addEventListener("click", onClick, true);
-    frame = window.requestAnimationFrame(enforceState);
+    document.addEventListener("keydown", onKeyDown, true);
 
     return () => {
       observer.disconnect();
       window.cancelAnimationFrame(frame);
       document.removeEventListener("click", onClick, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+      for (const section of getSections()) {
+        section.header.removeAttribute("role");
+        section.header.removeAttribute("tabindex");
+        section.header.removeAttribute("aria-expanded");
+        section.header.style.cursor = "";
+        section.header.style.userSelect = "";
+        section.body.hidden = false;
+      }
     };
   }, []);
 
