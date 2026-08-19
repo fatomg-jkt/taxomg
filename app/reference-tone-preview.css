@@ -1,5 +1,10 @@
 /* Preview branding adjustments only. Keep the original dashboard palette and dark navy sidebar. */
 
+/* Remove the small TAX, FINANCE & LEGAL pill at the top of the sidebar. */
+main > aside > div.relative.mb-5.flex.justify-center > div.flex.w-full.flex-col.items-center > p:first-child {
+  display: none !important;
+}
+
 /* Preview branding: remove the OMG logo and replace it with the requested dashboard name. */
 main img[alt="OMG - Obsidian Management Group"] {
   display: none !important;
@@ -25,7 +30,7 @@ main.dashboard-grid section > div.mb-8.flex.items-center.gap-4::after {
 main > aside > div.relative.mb-5.flex.justify-center > div.flex.w-full.flex-col.items-center::after {
   content: "Dashboard Finance, Tax & Legal\A Kantor Kencana";
   display: block;
-  margin-top: 0.75rem;
+  margin-top: 0.25rem;
   white-space: pre;
   text-align: center;
   font-family: var(--font-title) !important;
