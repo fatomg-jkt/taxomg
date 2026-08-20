@@ -2,7 +2,7 @@ import { get, put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
 const fileName = "cashflow-data.json";
-const empty = { cashflowData: { projection: [], actual: [], bankMutation: [], paymentRequests: [], lastUpdated: null }, updatedAt: null };
+const empty = { cashflowData: { projection: [], actual: [], bankMutation: [], paymentRequests: [], openingBalance: 0, lastUpdated: null }, updatedAt: null };
 export const dynamic = "force-dynamic";
 
 export async function GET() {
@@ -24,7 +24,14 @@ export async function POST(request: Request) {
   const payload = await request.json().catch(() => ({}));
   const input = payload.cashflowData ?? {};
   const updatedAt = new Date().toISOString();
-  const cashflowData = { projection: Array.isArray(input.projection) ? input.projection : [], actual: Array.isArray(input.actual) ? input.actual : [], bankMutation: Array.isArray(input.bankMutation) ? input.bankMutation : [], paymentRequests: Array.isArray(input.paymentRequests) ? input.paymentRequests : [], lastUpdated: updatedAt };
+  const cashflowData = {
+    projection: Array.isArray(input.projection) ? input.projection : [],
+    actual: Array.isArray(input.actual) ? input.actual : [],
+    bankMutation: Array.isArray(input.bankMutation) ? input.bankMutation : [],
+    paymentRequests: Array.isArray(input.paymentRequests) ? input.paymentRequests : [],
+    openingBalance: Number.isFinite(Number(input.openingBalance)) ? Number(input.openingBalance) : 0,
+    lastUpdated: updatedAt,
+  };
   const blob = await put(fileName, JSON.stringify({ cashflowData, updatedAt }, null, 2), { access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: true, storeId });
   return NextResponse.json({ ok: true, updatedAt, url: blob.url });
 }
