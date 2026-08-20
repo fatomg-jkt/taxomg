@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { AlertTriangle, BadgeDollarSign, PiggyBank, Target, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -25,22 +26,10 @@ const clean = (value: unknown) => String(value ?? "").trim();
 const norm = (value: unknown) => clean(value).toLocaleLowerCase("id-ID");
 
 function currentPage() { return new URLSearchParams(window.location.search).get("page") || ""; }
-function weekNumber(value: unknown) { return Number(clean(value).match(/(\d{1,2})/)?.[1] ?? 0); }
 function isTransfer(row: RawEntry) { const text = norm(`${row.type || ""} ${row.description || ""} ${row.notes || ""}`); return text.includes("pindah dana") || text.includes("pindah buku") || text.includes("transfer internal") || text.includes("transfer antar"); }
 function isRevenue(row: RawEntry) { const text = norm(`${row.type || ""} ${row.description || ""}`); return text.includes("revenue") || text.includes("pendapatan") || text.includes("penerimaan") || text.includes("cash in") || text.includes("uang masuk"); }
-function projectionIn(row: RawEntry) { return !isTransfer(row) && isRevenue(row) ? amount(row.nominal) : 0; }
 function projectionOut(row: RawEntry) { return !isTransfer(row) && !isRevenue(row) ? amount(row.nominal) : 0; }
-function actualIn(row: RawEntry) { if (isTransfer(row)) return 0; const debit = amount(row.debit); return debit > 0 ? debit : isRevenue(row) ? amount(row.nominal) : 0; }
 function actualOut(row: RawEntry) { if (isTransfer(row)) return 0; const credit = amount(row.credit); return credit > 0 ? credit : !isRevenue(row) ? amount(row.nominal) : 0; }
-
-function openingBalance(data: RawCashflow) {
-  const explicit = amount(data.openingBalance);
-  if (explicit) return explicit;
-  const rows = [...(data.bankMutation ?? [])].filter((row) => row.date).sort((a, b) => clean(a.date).localeCompare(clean(b.date)));
-  const first = rows[0];
-  if (!first) return 0;
-  return amount(first.balance) - amount(first.debit) + amount(first.credit);
-}
 
 function findCashflowCard(title: string) {
   const heading = Array.from(document.querySelectorAll<HTMLElement>("h1,h2,h3,h4,h5,h6")).find((node) => node.textContent?.trim() === title);
@@ -67,11 +56,6 @@ function hideElement(element: HTMLElement | null) {
     element.dataset.cashflowSummaryPreviousDisplay = element.style.display;
   }
   element.style.display = "none";
-}
-
-function SummaryCell({ label, value, tone = "default" }: { label: string; value: string; tone?: "default" | "red" | "blue" | "yellow" }) {
-  const toneClass = tone === "red" ? "bg-red-50 text-red-700" : tone === "blue" ? "bg-sky-100 text-slate-950" : tone === "yellow" ? "bg-yellow-100 text-slate-950" : "bg-white text-slate-950";
-  return <div className={`border border-slate-300 p-4 text-center ${toneClass}`}><p className="text-xs font-bold text-slate-700">{label}</p><p className="mt-1 text-lg font-black">{value}</p></div>;
 }
 
 export function CashflowSummaryStructureEnhancement() {
@@ -145,48 +129,69 @@ export function CashflowSummaryStructureEnhancement() {
   const summary = useMemo(() => {
     const projection = data.projection ?? [];
     const actual = data.actual ?? [];
-    const allWeeks = [...projection, ...actual].map((row) => weekNumber(row.week)).filter((week) => week > 0).sort((a, b) => a - b);
-    const minWeek = allWeeks[0] ?? 0;
-    const maxWeek = allWeeks[allWeeks.length - 1] ?? 0;
-    const period = minWeek ? (minWeek === maxWeek ? `Week ${minWeek}` : `Week ${minWeek}-${maxWeek}`) : "-";
-    const totalProjectionOut = projection.reduce((sum, row) => sum + projectionOut(row), 0);
-    const totalActualOut = actual.reduce((sum, row) => sum + actualOut(row), 0);
-    const totalProjectionIn = projection.reduce((sum, row) => sum + projectionIn(row), 0);
-    const totalActualIn = actual.reduce((sum, row) => sum + actualIn(row), 0);
-    const opening = openingBalance(data);
-    const remaining = totalProjectionOut - totalActualOut;
-    const realization = totalProjectionOut ? totalActualOut / totalProjectionOut * 100 : totalActualOut ? -1 : 0;
-    const status = totalProjectionOut === 0 && totalActualOut === 0 ? "BELUM ADA DATA" : totalActualOut > totalProjectionOut ? "OVER" : totalActualOut === 0 ? "BELUM REALISASI" : "ON CASHFLOW";
-    return {
-      totalProjectionOut,
-      totalActualOut,
-      remaining,
-      realization,
-      status,
-      period,
-      closingActual: opening + totalActualIn - totalActualOut,
-      closingProjection: opening + totalProjectionIn - totalProjectionOut,
-    };
+    const totalProjection = projection.reduce((sum, row) => sum + projectionOut(row), 0);
+    const totalActual = actual.reduce((sum, row) => sum + actualOut(row), 0);
+    const remaining = totalProjection - totalActual;
+    const realization = totalProjection ? totalActual / totalProjection * 100 : totalActual ? -1 : 0;
+    const status = totalProjection === 0 && totalActual === 0 ? "BELUM ADA DATA" : totalActual > totalProjection ? "OVER CASHFLOW" : totalActual === 0 ? "BELUM REALISASI" : "ON CASHFLOW";
+    return { totalProjection, totalActual, remaining, realization, status };
   }, [data]);
 
   if (!host || !active) return null;
 
-  const over = summary.status === "OVER";
+  const over = summary.status === "OVER CASHFLOW";
+
   return createPortal(
-    <Card className="rounded-3xl">
-      <CardContent className="p-4 sm:p-5">
-        <div className="grid overflow-hidden rounded-xl border border-slate-400 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCell label="Total Proyeksi Out" value={rupiah(summary.totalProjectionOut)} />
-          <SummaryCell label="Total Realisasi Out" value={rupiah(summary.totalActualOut)} />
-          <SummaryCell label="Sisa Cashflow" value={rupiah(summary.remaining)} tone={summary.remaining < 0 ? "red" : "default"} />
-          <SummaryCell label="Saldo Akhir Realisasi" value={rupiah(summary.closingActual)} tone="blue" />
-          <SummaryCell label="Periode Aktif" value={summary.period} />
-          <div className={`border border-slate-300 p-4 text-center ${over ? "bg-red-50" : "bg-white"}`}><p className="text-xs font-bold text-slate-700">Status Total</p><div className="mt-1"><Badge className={over ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}>{over ? "⚠ OVER" : summary.status}</Badge></div></div>
-          <SummaryCell label="% Realisasi" value={summary.realization < 0 ? "-" : `${summary.realization.toFixed(0)}%`} />
-          <SummaryCell label="Saldo Akhir Proyeksi" value={rupiah(summary.closingProjection)} tone="yellow" />
-        </div>
-      </CardContent>
-    </Card>,
+    <div className="space-y-4">
+      <Card className="rounded-3xl">
+        <CardContent className="p-5">
+          <h2 className="text-base font-bold text-slate-950">Ringkasan Arus Kas</h2>
+          <p className="mt-1 text-sm text-slate-600">Revenue dihitung sebagai Cash In. Fix Cost, Project Cost, dan Asset dihitung sebagai Cash Out. Pindah Dana tidak masuk perhitungan Cash Out.</p>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <Card className="rounded-3xl border-2 border-blue-500 bg-blue-50/70">
+          <CardContent className="p-5">
+            <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-600"><Target className="h-5 w-5" /></div>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Total Proyeksi</p>
+            <p className="mt-3 text-xl font-black text-slate-950">{rupiah(summary.totalProjection)}</p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-2 border-emerald-500 bg-emerald-50/70">
+          <CardContent className="p-5">
+            <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600"><BadgeDollarSign className="h-5 w-5" /></div>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Total Realisasi</p>
+            <p className="mt-3 text-xl font-black text-slate-950">{rupiah(summary.totalActual)}</p>
+          </CardContent>
+        </Card>
+
+        <Card className={`rounded-3xl border-2 ${summary.remaining < 0 ? "border-red-500 bg-red-50/70" : "border-amber-500 bg-amber-50/70"}`}>
+          <CardContent className="p-5">
+            <div className={`mb-5 flex h-10 w-10 items-center justify-center rounded-xl ${summary.remaining < 0 ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"}`}><PiggyBank className="h-5 w-5" /></div>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Sisa Cashflow</p>
+            <p className={`mt-3 text-xl font-black ${summary.remaining < 0 ? "text-red-600" : "text-slate-950"}`}>{rupiah(summary.remaining)}</p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-3xl border-2 border-violet-500 bg-violet-50/70">
+          <CardContent className="p-5">
+            <div className="mb-5 flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-600"><TrendingUp className="h-5 w-5" /></div>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">% Realisasi</p>
+            <p className="mt-3 text-xl font-black text-slate-950">{summary.realization < 0 ? "-" : `${summary.realization.toFixed(1)}%`}</p>
+          </CardContent>
+        </Card>
+
+        <Card className={`rounded-3xl border-2 ${over ? "border-red-500 bg-red-50/70" : "border-emerald-500 bg-emerald-50/70"}`}>
+          <CardContent className="p-5">
+            <div className={`mb-5 flex h-10 w-10 items-center justify-center rounded-xl ${over ? "bg-red-100 text-red-600" : "bg-white text-slate-600"}`}><AlertTriangle className="h-5 w-5" /></div>
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">Status Cashflow</p>
+            <div className="mt-3"><Badge className={over ? "bg-red-100 text-red-700" : summary.status === "ON CASHFLOW" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{summary.status}</Badge></div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>,
     host,
   );
 }
