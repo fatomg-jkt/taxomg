@@ -1,5 +1,4 @@
-import { CashflowEditorEnhancements } from "@/components/cashflow-editor-enhancements";
-import { CashflowWorkbookEnhancement } from "@/components/cashflow-workbook-enhancement";
+import { CashflowRollingMechanismEnhancement } from "@/components/cashflow-rolling-mechanism-enhancement";
 import { DashboardAuth } from "@/components/dashboard-auth";
 import { LoginCopyEnhancement } from "@/components/login-copy-enhancement";
 import { PaymentRequestEnhancement } from "@/components/payment-request-enhancement";
@@ -7,5 +6,5 @@ import { SidebarDashboardAccordion } from "@/components/sidebar-dashboard-accord
 import { UserAccessSettingsOverlay } from "@/components/user-access-settings-overlay";
 
 export default function Home() {
-  return <><DashboardAuth /><LoginCopyEnhancement /><SidebarDashboardAccordion /><CashflowEditorEnhancements /><CashflowWorkbookEnhancement /><PaymentRequestEnhancement /><UserAccessSettingsOverlay /></>;
+  return <><DashboardAuth /><LoginCopyEnhancement /><SidebarDashboardAccordion /><CashflowRollingMechanismEnhancement /><PaymentRequestEnhancement /><UserAccessSettingsOverlay /></>;
 }
