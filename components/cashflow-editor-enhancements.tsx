@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 const EDITOR_TITLES = new Set(["Cashflow > Proyeksi", "Cashflow > Realisasi"]);
+const DEBIT_HEADER = "Debit (Uang Masuk)";
+const CREDIT_HEADER = "Kredit (Uang Keluar)";
 
 function findEditorElements() {
   const title = Array.from(document.querySelectorAll<HTMLParagraphElement>("p")).find((node) => EDITOR_TITLES.has(node.textContent?.trim() ?? ""));
@@ -20,13 +22,82 @@ function findEditorElements() {
   return { actions, table, title: title?.textContent?.trim() ?? "" };
 }
 
+function parseRupiahText(value: string) {
+  const numeric = Number(value.replace(/[^0-9-]/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function isCashInType(value: string) {
+  const text = value.trim().toLocaleLowerCase("id-ID");
+  return text.includes("revenue") || text.includes("pendapatan") || text.includes("penerimaan") || text.includes("cash in") || text.includes("uang masuk");
+}
+
+function syncDebitCreditColumns(table: HTMLTableElement | null) {
+  if (!table) return;
+  const headerRow = table.querySelector<HTMLTableRowElement>("thead tr");
+  if (!headerRow) return;
+
+  let headers = Array.from(headerRow.querySelectorAll<HTMLTableCellElement>("th"));
+  let nominalIndex = headers.findIndex((head) => head.textContent?.trim() === "Nominal");
+  if (nominalIndex < 0) return;
+
+  if (!headers.some((head) => head.dataset.cashflowDebitColumn === "true")) {
+    const debitHead = document.createElement("th");
+    debitHead.dataset.cashflowDebitColumn = "true";
+    debitHead.textContent = DEBIT_HEADER;
+    debitHead.className = headers[nominalIndex]?.className ?? "";
+
+    const creditHead = document.createElement("th");
+    creditHead.dataset.cashflowCreditColumn = "true";
+    creditHead.textContent = CREDIT_HEADER;
+    creditHead.className = headers[nominalIndex]?.className ?? "";
+
+    headers[nominalIndex]?.insertAdjacentElement("afterend", creditHead);
+    headers[nominalIndex]?.insertAdjacentElement("afterend", debitHead);
+    headers = Array.from(headerRow.querySelectorAll<HTMLTableCellElement>("th"));
+    nominalIndex = headers.findIndex((head) => head.textContent?.trim() === "Nominal");
+  }
+
+  const typeIndex = headers.findIndex((head) => head.textContent?.trim() === "JENIS");
+  if (typeIndex < 0 || nominalIndex < 0) return;
+
+  Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr")).forEach((row) => {
+    if (row.querySelector("td[colspan]")) return;
+    let cells = Array.from(row.children).filter((cell): cell is HTMLTableCellElement => cell instanceof HTMLTableCellElement);
+    const typeText = cells[typeIndex]?.textContent?.trim() ?? "";
+    const nominalText = cells[nominalIndex]?.textContent?.trim() ?? "";
+    const hasValue = parseRupiahText(nominalText) !== 0;
+    const cashIn = isCashInType(typeText);
+    const debitText = cashIn && hasValue ? nominalText : "-";
+    const creditText = !cashIn && hasValue ? nominalText : "-";
+
+    let debitCell = row.querySelector<HTMLTableCellElement>("td[data-cashflow-debit-column='true']");
+    let creditCell = row.querySelector<HTMLTableCellElement>("td[data-cashflow-credit-column='true']");
+    if (!debitCell || !creditCell) {
+      const nominalCell = cells[nominalIndex];
+      if (!nominalCell) return;
+      debitCell = document.createElement("td");
+      debitCell.dataset.cashflowDebitColumn = "true";
+      debitCell.className = nominalCell.className;
+      creditCell = document.createElement("td");
+      creditCell.dataset.cashflowCreditColumn = "true";
+      creditCell.className = nominalCell.className;
+      nominalCell.insertAdjacentElement("afterend", creditCell);
+      nominalCell.insertAdjacentElement("afterend", debitCell);
+      cells = Array.from(row.children).filter((cell): cell is HTMLTableCellElement => cell instanceof HTMLTableCellElement);
+    }
+    if (debitCell.textContent !== debitText) debitCell.textContent = debitText;
+    if (creditCell.textContent !== creditText) creditCell.textContent = creditText;
+  });
+}
+
 function applyTableLayout(table: HTMLTableElement | null, query: string) {
   if (!table) return;
   const headers = Array.from(table.querySelectorAll<HTMLTableCellElement>("thead th"));
   const actual = headers.some((head) => head.textContent?.trim() === "Keterangan");
   const widths = actual
-    ? ["3%", "3.5%", "8%", "8%", "21%", "8%", "10%", "9%", "7%", "10%", "8%", "4.5%"]
-    : ["3%", "4%", "9%", "9%", "27%", "9%", "11%", "10%", "8%", "6%", "4%"];
+    ? ["3%", "3.5%", "7%", "7%", "18%", "7%", "8%", "8%", "8%", "7.5%", "6.5%", "8%", "6%", "4.5%"]
+    : ["3%", "3.5%", "7.5%", "7.5%", "20%", "7%", "9%", "9%", "9%", "8%", "7%", "6.5%", "3.5%"];
 
   table.style.width = "100%";
   table.style.minWidth = "0";
@@ -64,14 +135,15 @@ function exportTableData(table: HTMLTableElement) {
   const headers = Array.from(table.querySelectorAll<HTMLTableCellElement>("thead th")).map((head) => head.textContent?.trim() ?? "");
   const indexes = headers.map((header, index) => ({ header, index })).filter(({ header }) => header && header !== "Hapus");
   const exportHeaders = indexes.map(({ header }) => header);
-  const nominalIndex = exportHeaders.findIndex((header) => header === "Nominal");
+  const numericHeaders = new Set(["Nominal", DEBIT_HEADER, CREDIT_HEADER]);
   const rows = Array.from(table.querySelectorAll<HTMLTableRowElement>("tbody tr"))
     .filter((row) => row.style.display !== "none" && !row.querySelector("td[colspan]"))
     .map((row) => {
       const cells = Array.from(row.children).filter((cell): cell is HTMLTableCellElement => cell instanceof HTMLTableCellElement);
       return indexes.map(({ index }, exportIndex) => {
         const value = cells[index]?.textContent?.trim() ?? "";
-        if (exportIndex === nominalIndex) {
+        if (numericHeaders.has(exportHeaders[exportIndex])) {
+          if (value === "-") return 0;
           const numeric = Number(value.replace(/[^0-9-]/g, ""));
           return Number.isFinite(numeric) ? numeric : value;
         }
@@ -163,6 +235,7 @@ export function CashflowEditorEnhancements() {
       }
       setExportHost((current) => current === nextExportHost ? current : nextExportHost);
 
+      syncDebitCreditColumns(table);
       applyTableLayout(table, query.trim().toLocaleLowerCase("id-ID"));
       applying = false;
     };
