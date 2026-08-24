@@ -35,3 +35,5 @@ export async function supabaseRequest<T>(path: string, init: RequestInit = {}): 
 
   return payload as T;
 }
+
+// Preview redeploy trigger for Supabase finance migration.
