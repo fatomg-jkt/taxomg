@@ -1,104 +1,19 @@
 import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
-import { blobOptions, hasBlobConfig, metadataPathname, readMetadata, type UploadedPdfDocument } from "./shared";
-
-const noStoreHeaders = { "Cache-Control": "no-store" };
-const prefix = "tax-documents/";
-const privateStoreMismatchMessage = "Konfigurasi akses Vercel Blob tidak sesuai. Store saat ini private.";
-const missingTokenMessage = "BLOB_READ_WRITE_TOKEN belum tersedia di Vercel Environment Variables.";
-
+import { uploadDocument } from "@/lib/document-storage";
+import { readMetadata } from "./shared";
+const headers = { "Cache-Control": "no-store" };
 export const dynamic = "force-dynamic";
-
-function sanitizeFileName(name: string) {
-  return name.replace(/[^a-zA-Z0-9._ -]/g, "_").replace(/\s+/g, " ").trim() || "dokumen.pdf";
-}
-
-function isPdfFile(file: File) {
-  const lowerName = file.name.toLowerCase();
-  return file.type === "application/pdf" || (!file.type && lowerName.endsWith(".pdf"));
-}
-
-function isPrivateStoreMismatch(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes("cannot use public access on a private store") || message.toLowerCase().includes("private store");
-}
-
-async function writeMetadata(documents: UploadedPdfDocument[]) {
-  const body = JSON.stringify({ documents, updatedAt: new Date().toISOString() }, null, 2);
-  return put(metadataPathname, body, {
-    access: "private",
-    contentType: "application/json",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    ...blobOptions(),
-  });
-}
-
-export async function GET() {
-  if (!hasBlobConfig()) return NextResponse.json({ documents: [] }, { headers: noStoreHeaders });
-
-  try {
-    const documents = await readMetadata();
-    return NextResponse.json({ documents }, { headers: noStoreHeaders });
-  } catch (error) {
-    console.error("[tax-documents] Failed to read PDF metadata from Vercel Blob", error);
-    return NextResponse.json({ documents: [] }, { headers: noStoreHeaders });
-  }
-}
-
+const sanitize = (name: string) => name.replace(/[^a-zA-Z0-9._ -]/g, "_").replace(/\s+/g, " ").trim() || "dokumen.pdf";
+export async function GET() { try { return NextResponse.json({ documents: await readMetadata() }, { headers }); } catch (error) { console.error("[tax-documents] Supabase read failed", error); return NextResponse.json({ error: "Gagal membaca dokumen pajak dari Supabase." }, { status: 500, headers }); } }
 export async function POST(request: Request) {
-  if (!hasBlobConfig()) {
-    console.error("[tax-documents] Missing BLOB_READ_WRITE_TOKEN on the server.");
-    return NextResponse.json({ ok: false, error: missingTokenMessage }, { status: 500 });
-  }
-
-  const formData = await request.formData().catch((error) => {
-    console.error("[tax-documents] Failed to parse multipart form data", error);
-    return null;
-  });
-  const file = formData?.get("file");
+  const form = await request.formData().catch(() => null); const file = form?.get("file");
   if (!(file instanceof File)) return NextResponse.json({ ok: false, error: "File PDF wajib dipilih." }, { status: 400 });
-
-  if (!isPdfFile(file)) return NextResponse.json({ ok: false, error: "File harus berformat PDF." }, { status: 400 });
-
-  const uploadedAt = new Date().toISOString();
-  const id = `pdf-${crypto.randomUUID()}`;
-  const originalName = sanitizeFileName(file.name);
-  const pathname = `${prefix}${id}-${originalName}`;
-
-  let blobUrl = "";
+  if (file.type !== "application/pdf" && !(!file.type && file.name.toLowerCase().endsWith(".pdf"))) return NextResponse.json({ ok: false, error: "File harus berformat PDF." }, { status: 400 });
+  const id = `pdf-${crypto.randomUUID()}`, originalName = sanitize(file.name), storagePath = `${id}-${originalName}`;
   try {
-    const blob = await put(pathname, file, {
-      access: "private",
-      contentType: "application/pdf",
-      addRandomSuffix: false,
-      allowOverwrite: false,
-      ...blobOptions(),
-    });
-    blobUrl = blob.url;
-  } catch (error) {
-    console.error("[tax-documents] Failed to upload PDF to Vercel Blob", { pathname, size: file.size, type: file.type, error });
-    return NextResponse.json({ ok: false, error: isPrivateStoreMismatch(error) ? privateStoreMismatchMessage : "Gagal upload ke Vercel Blob." }, { status: 500 });
-  }
-
-  const document: UploadedPdfDocument = {
-    id,
-    originalName,
-    name: originalName,
-    pathname,
-    uploadedAt,
-    size: file.size,
-    type: file.type || "application/pdf",
-    url: blobUrl,
-  };
-
-  try {
-    const documents = await readMetadata();
-    await writeMetadata([document, ...documents]);
-  } catch (error) {
-    console.error("[tax-documents] Failed to save PDF metadata to Vercel Blob", { document, error });
-    return NextResponse.json({ ok: false, error: isPrivateStoreMismatch(error) ? privateStoreMismatchMessage : "Gagal menyimpan metadata dokumen." }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true, document }, { status: 201 });
+    const stored = await uploadDocument({ id, bucket: "tax-documents", storage_path: storagePath, original_name: originalName, content_type: file.type || "application/pdf", size: file.size, category: "tax-document", metadata: {} }, file);
+    if (process.env.BLOB_READ_WRITE_TOKEN) try { await put(`tax-documents/${storagePath}`, file, { access: "private", contentType: stored.content_type, addRandomSuffix: false, allowOverwrite: false, token: process.env.BLOB_READ_WRITE_TOKEN }); } catch (error) { console.warn("[tax-documents] Blob backup failed after Supabase upload", error); }
+    return NextResponse.json({ ok: true, document: { id, originalName, name: originalName, pathname: storagePath, uploadedAt: stored.created_at, size: file.size, type: stored.content_type, url: `/api/tax-documents/${id}` } }, { status: 201 });
+  } catch (error) { console.error("[tax-documents] Supabase upload failed", error); return NextResponse.json({ ok: false, error: "Gagal upload dokumen pajak ke Supabase." }, { status: 500 }); }
 }
