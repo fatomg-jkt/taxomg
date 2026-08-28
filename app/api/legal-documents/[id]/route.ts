@@ -1,15 +1,25 @@
-import { get } from "@vercel/blob";
 import { NextResponse } from "next/server";
-import { blobNotConfiguredMessage, hasLegalBlobConfiguration, legalBlobOptions, readLegalData } from "../../legal-data/shared";
+import { downloadStorageObject, getDocumentMetadata } from "@/lib/supabase-storage-rest";
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!hasLegalBlobConfiguration()) return NextResponse.json({ error: blobNotConfiguredMessage, message: blobNotConfiguredMessage }, { status: 500 });
   const { id } = await params;
-  const document = (await readLegalData()).documents.find((item) => item.id === id);
-  if (!document?.pathname) return NextResponse.json({ error: "Dokumen tidak ditemukan." }, { status: 404 });
-  const result = await get(document.pathname, { access: "private", ...legalBlobOptions() });
-  if (result?.statusCode !== 200 || !result.stream) return NextResponse.json({ error: "Dokumen tidak ditemukan." }, { status: 404 });
-  const download = new URL(request.url).searchParams.get("download") === "1";
-  const safeName = document.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return new Response(result.stream, { headers: { "Cache-Control": "private, no-store", "Content-Type": document.fileType || "application/octet-stream", "Content-Disposition": `${download ? "attachment" : "inline"}; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(document.fileName)}` } });
+  try {
+    const document = await getDocumentMetadata(id, "legal", "legal-document");
+    if (!document) return NextResponse.json({ error: "Dokumen tidak ditemukan." }, { status: 404 });
+
+    const result = await downloadStorageObject(document.storage_bucket, document.storage_path);
+    const download = new URL(request.url).searchParams.get("download") === "1";
+    const safeName = document.original_filename.replace(/[^a-zA-Z0-9._-]/g, "_");
+    return new Response(result.body, {
+      headers: {
+        "Cache-Control": "private, no-store",
+        "Content-Type": document.mime_type || "application/octet-stream",
+        "Content-Length": String(document.size_bytes ?? ""),
+        "Content-Disposition": `${download ? "attachment" : "inline"}; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(document.original_filename)}`,
+      },
+    });
+  } catch (error) {
+    console.error("[legal-documents] Supabase download failed", { id, error });
+    return NextResponse.json({ error: "Gagal membuka dokumen." }, { status: 500 });
+  }
 }
