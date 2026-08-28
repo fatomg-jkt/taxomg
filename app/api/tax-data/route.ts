@@ -1,28 +1,24 @@
-import { get, put } from "@vercel/blob";
+import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
+import { readDashboardState, writeDashboardState } from "@/lib/supabase-dashboard-state";
 
 const fileName = "tax-dashboard-data.json";
-const emptyPayload = { records: [], summaryOverrides: {}, updatedAt: null };
+const stateKey = "tax-data";
+const emptyPayload = { records: [], summaryOverrides: {}, updatedAt: null as string | null };
 const noStoreHeaders = { "Cache-Control": "no-store" };
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const storeId = process.env.TAXOMG_STORE_ID;
-  if (!storeId) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
-
   try {
-    const result = await get(fileName, { access: "private", storeId });
-    if (result?.statusCode !== 200 || !result.stream) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
-
-    const text = await new Response(result.stream).text();
-    if (!text.trim()) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
-
-    const payload = JSON.parse(text);
-    return NextResponse.json({ ...emptyPayload, ...payload }, { headers: noStoreHeaders });
+    const payload = await readDashboardState(stateKey, emptyPayload);
+    return NextResponse.json(payload, { headers: noStoreHeaders });
   } catch (error) {
-    console.error("[tax-data] Failed to read blob", error);
-    return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
+    console.error("[tax-data] Supabase read failed", error);
+    return NextResponse.json(
+      { ok: false, error: "Gagal membaca data pajak dari Supabase." },
+      { status: 500, headers: noStoreHeaders },
+    );
   }
 }
 
@@ -32,19 +28,45 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Invalid password" }, { status: 401 });
   }
 
-  if (!process.env.TAXOMG_STORE_ID) {
-    return NextResponse.json({ ok: false, error: "Missing TAXOMG_STORE_ID" }, { status: 500 });
+  const input = await request.json().catch(() => ({}));
+  const payload = {
+    records: Array.isArray(input.records) ? input.records : [],
+    summaryOverrides: input.summaryOverrides ?? {},
+    updatedAt: new Date().toISOString(),
+  };
+
+  try {
+    payload.updatedAt = await writeDashboardState(stateKey, payload);
+  } catch (error) {
+    console.error("[tax-data] Supabase write failed", error);
+    return NextResponse.json(
+      { ok: false, error: "Gagal menyimpan data pajak ke Supabase." },
+      { status: 500 },
+    );
   }
 
-  const payload = await request.json().catch(() => ({}));
-  const updatedAt = new Date().toISOString();
-  const body = JSON.stringify({ records: payload.records ?? [], summaryOverrides: payload.summaryOverrides ?? {}, updatedAt }, null, 2);
-  const blob = await put(fileName, body, {
-    access: "private",
-    contentType: "application/json",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    storeId: process.env.TAXOMG_STORE_ID,
+  // Blob hanya backup sekunder. Kegagalan Blob tidak boleh menggagalkan penyimpanan Supabase.
+  let blobUrl: string | undefined;
+  try {
+    if (process.env.TAXOMG_STORE_ID) {
+      const blob = await put(fileName, JSON.stringify(payload, null, 2), {
+        access: "private",
+        contentType: "application/json",
+        addRandomSuffix: false,
+        allowOverwrite: true,
+        storeId: process.env.TAXOMG_STORE_ID,
+      });
+      blobUrl = blob.url;
+    }
+  } catch (error) {
+    console.warn("[tax-data] Blob backup failed; Supabase data is already safe", error);
+  }
+
+  return NextResponse.json({
+    ok: true,
+    updatedAt: payload.updatedAt,
+    primaryStorage: "supabase",
+    backupStorage: blobUrl ? "vercel-blob" : "unavailable",
+    url: blobUrl,
   });
-  return NextResponse.json({ ok: true, updatedAt, url: blob.url });
 }
