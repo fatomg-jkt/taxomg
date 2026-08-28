@@ -1,50 +1,24 @@
-import { get, put } from "@vercel/blob";
 import { NextResponse } from "next/server";
+import { backupDashboardState, readDashboardState, writeDashboardState } from "@/lib/dashboard-state";
 
+const key = "tax-data";
 const fileName = "tax-dashboard-data.json";
-const emptyPayload = { records: [], summaryOverrides: {}, updatedAt: null };
-const noStoreHeaders = { "Cache-Control": "no-store" };
-
+const emptyPayload = { records: [], summaryOverrides: {}, updatedAt: null as string | null };
+const headers = { "Cache-Control": "no-store" };
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const storeId = process.env.TAXOMG_STORE_ID;
-  if (!storeId) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
-
-  try {
-    const result = await get(fileName, { access: "private", storeId });
-    if (result?.statusCode !== 200 || !result.stream) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
-
-    const text = await new Response(result.stream).text();
-    if (!text.trim()) return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
-
-    const payload = JSON.parse(text);
-    return NextResponse.json({ ...emptyPayload, ...payload }, { headers: noStoreHeaders });
-  } catch (error) {
-    console.error("[tax-data] Failed to read blob", error);
-    return NextResponse.json(emptyPayload, { headers: noStoreHeaders });
-  }
+  try { return NextResponse.json(await readDashboardState(key, emptyPayload), { headers }); }
+  catch (error) { console.error("[tax-data] Supabase read failed", error); return NextResponse.json({ error: "Gagal membaca data pajak dari Supabase." }, { status: 500, headers }); }
 }
 
 export async function POST(request: Request) {
-  const expectedPassword = process.env.DASHBOARD_EDIT_PASSWORD;
-  if (!expectedPassword || request.headers.get("x-dashboard-password") !== expectedPassword) {
-    return NextResponse.json({ ok: false, error: "Invalid password" }, { status: 401 });
-  }
-
-  if (!process.env.TAXOMG_STORE_ID) {
-    return NextResponse.json({ ok: false, error: "Missing TAXOMG_STORE_ID" }, { status: 500 });
-  }
-
-  const payload = await request.json().catch(() => ({}));
-  const updatedAt = new Date().toISOString();
-  const body = JSON.stringify({ records: payload.records ?? [], summaryOverrides: payload.summaryOverrides ?? {}, updatedAt }, null, 2);
-  const blob = await put(fileName, body, {
-    access: "private",
-    contentType: "application/json",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    storeId: process.env.TAXOMG_STORE_ID,
-  });
-  return NextResponse.json({ ok: true, updatedAt, url: blob.url });
+  if (!process.env.DASHBOARD_EDIT_PASSWORD || request.headers.get("x-dashboard-password") !== process.env.DASHBOARD_EDIT_PASSWORD) return NextResponse.json({ ok: false, error: "Invalid password" }, { status: 401 });
+  const input = await request.json().catch(() => ({}));
+  const payload = { records: input.records ?? [], summaryOverrides: input.summaryOverrides ?? {}, updatedAt: new Date().toISOString() };
+  try {
+    payload.updatedAt = await writeDashboardState(key, payload);
+    const blob = await backupDashboardState(fileName, payload);
+    return NextResponse.json({ ok: true, updatedAt: payload.updatedAt, url: blob?.url });
+  } catch (error) { console.error("[tax-data] Supabase write failed", error); return NextResponse.json({ ok: false, error: "Gagal menyimpan data pajak ke Supabase." }, { status: 500 }); }
 }

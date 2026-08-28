@@ -1,15 +1,3 @@
-import { get } from "@vercel/blob";
 import { NextResponse } from "next/server";
-import { blobNotConfiguredMessage, hasLegalBlobConfiguration, legalBlobOptions, readLegalData } from "../../legal-data/shared";
-
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!hasLegalBlobConfiguration()) return NextResponse.json({ error: blobNotConfiguredMessage, message: blobNotConfiguredMessage }, { status: 500 });
-  const { id } = await params;
-  const document = (await readLegalData()).documents.find((item) => item.id === id);
-  if (!document?.pathname) return NextResponse.json({ error: "Dokumen tidak ditemukan." }, { status: 404 });
-  const result = await get(document.pathname, { access: "private", ...legalBlobOptions() });
-  if (result?.statusCode !== 200 || !result.stream) return NextResponse.json({ error: "Dokumen tidak ditemukan." }, { status: 404 });
-  const download = new URL(request.url).searchParams.get("download") === "1";
-  const safeName = document.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-  return new Response(result.stream, { headers: { "Cache-Control": "private, no-store", "Content-Type": document.fileType || "application/octet-stream", "Content-Disposition": `${download ? "attachment" : "inline"}; filename="${safeName}"; filename*=UTF-8''${encodeURIComponent(document.fileName)}` } });
-}
+import { createDocumentSignedUrl, getDocument } from "@/lib/document-storage";
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) { const { id } = await params; try { const document = await getDocument(id, "legal-document"); if (!document) return NextResponse.json({ error: "Dokumen tidak ditemukan." }, { status: 404 }); const response = await fetch(await createDocumentSignedUrl(document)); if (!response.ok || !response.body) return NextResponse.json({ error: "Dokumen tidak ditemukan." }, { status: 404 }); const download = new URL(request.url).searchParams.get("download") === "1", safe = document.original_name.replace(/[^a-zA-Z0-9._-]/g, "_"); return new Response(response.body, { headers: { "Cache-Control": "private, no-store", "Content-Type": document.content_type, "Content-Length": String(document.size), "Content-Disposition": `${download ? "attachment" : "inline"}; filename="${safe}"; filename*=UTF-8''${encodeURIComponent(document.original_name)}` } }); } catch (error) { console.error("[legal-documents] Supabase download failed", error); return NextResponse.json({ error: "Gagal membuka dokumen." }, { status: 500 }); } }
