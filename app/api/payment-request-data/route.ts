@@ -1,8 +1,11 @@
-import { get, put } from "@vercel/blob";
+import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
+import { readDashboardState, writeDashboardState } from "@/lib/supabase-dashboard-state";
 
 const fileName = "payment-request-data.json";
-const empty = { requests: [], updatedAt: null };
+const stateKey = "payment-request-data";
+const empty = { requests: [], updatedAt: null as string | null };
+const headers = { "Cache-Control": "no-store" };
 
 export const dynamic = "force-dynamic";
 
@@ -22,55 +25,34 @@ type PaymentRequestInput = {
   createdAt?: string;
 };
 
-async function readRequests(storeId: string) {
-  try {
-    const result = await get(fileName, { access: "private", storeId });
-    if (result?.statusCode !== 200 || !result.stream) return empty;
-    const payload = JSON.parse(await new Response(result.stream).text());
-    return {
-      requests: Array.isArray(payload.requests) ? payload.requests : [],
-      updatedAt: payload.updatedAt ?? null,
-    };
-  } catch {
-    return empty;
-  }
-}
-
 export async function GET() {
-  const storeId = process.env.TAXOMG_STORE_ID;
-  if (!storeId) return NextResponse.json(empty, { headers: { "Cache-Control": "no-store" } });
-  const payload = await readRequests(storeId);
-  return NextResponse.json(payload, { headers: { "Cache-Control": "no-store" } });
+  try {
+    return NextResponse.json(await readDashboardState(stateKey, empty), { headers });
+  } catch (error) {
+    console.error("[payment-request-data] Supabase read failed", error);
+    return NextResponse.json({ error: "Gagal membaca pengajuan pembayaran dari Supabase." }, { status: 500, headers });
+  }
 }
 
 export async function POST(request: Request) {
   const password = process.env.DASHBOARD_EDIT_PASSWORD;
-  if (!password || request.headers.get("x-dashboard-password") !== password) {
-    return NextResponse.json({ error: "Invalid password" }, { status: 401 });
-  }
+  if (!password || request.headers.get("x-dashboard-password") !== password) return NextResponse.json({ error: "Invalid password" }, { status: 401 });
 
-  const storeId = process.env.TAXOMG_STORE_ID;
-  if (!storeId) return NextResponse.json({ error: "Missing TAXOMG_STORE_ID" }, { status: 500 });
-
-  const payload = await request.json().catch(() => ({}));
-  const input = (payload.request ?? {}) as PaymentRequestInput;
-  const required = [
-    input.userName,
-    input.department,
-    input.code,
-    input.invoiceDate,
-    input.description,
-    input.invoiceNumber,
-    input.vendor,
-    input.accountName,
-    input.bank,
-    input.accountNumber,
-  ];
+  const body = await request.json().catch(() => ({}));
+  const input = (body.request ?? {}) as PaymentRequestInput;
+  const required = [input.userName, input.department, input.code, input.invoiceDate, input.description, input.invoiceNumber, input.vendor, input.accountName, input.bank, input.accountNumber];
   if (required.some((value) => !String(value ?? "").trim()) || !Number.isFinite(Number(input.nominal)) || Number(input.nominal) <= 0) {
     return NextResponse.json({ error: "Semua field wajib diisi dengan benar." }, { status: 400 });
   }
 
-  const current = await readRequests(storeId);
+  let current = empty;
+  try {
+    current = await readDashboardState(stateKey, empty);
+  } catch (error) {
+    console.error("[payment-request-data] Supabase read before write failed", error);
+    return NextResponse.json({ error: "Gagal membaca data pengajuan pembayaran sebelum menyimpan." }, { status: 500 });
+  }
+
   const createdAt = new Date().toISOString();
   const nextRequest = {
     id: input.id || `payment-${crypto.randomUUID()}`,
@@ -87,16 +69,24 @@ export async function POST(request: Request) {
     accountNumber: String(input.accountNumber).trim(),
     createdAt,
   };
-  const updatedAt = createdAt;
-  const requests = [nextRequest, ...current.requests];
 
-  await put(fileName, JSON.stringify({ requests, updatedAt }, null, 2), {
-    access: "private",
-    contentType: "application/json",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    storeId,
-  });
+  const payload = { requests: [nextRequest, ...(Array.isArray(current.requests) ? current.requests : [])], updatedAt: createdAt };
+  try {
+    payload.updatedAt = await writeDashboardState(stateKey, payload);
+  } catch (error) {
+    console.error("[payment-request-data] Supabase write failed", error);
+    return NextResponse.json({ error: "Gagal menyimpan pengajuan pembayaran ke Supabase." }, { status: 500 });
+  }
 
-  return NextResponse.json({ ok: true, request: nextRequest, requests, updatedAt }, { status: 201 });
+  let blobUrl: string | undefined;
+  try {
+    if (process.env.TAXOMG_STORE_ID) {
+      const blob = await put(fileName, JSON.stringify(payload, null, 2), { access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: true, storeId: process.env.TAXOMG_STORE_ID });
+      blobUrl = blob.url;
+    }
+  } catch (error) {
+    console.warn("[payment-request-data] Blob backup failed; Supabase data is already safe", error);
+  }
+
+  return NextResponse.json({ ok: true, request: nextRequest, requests: payload.requests, updatedAt: payload.updatedAt, primaryStorage: "supabase", backupStorage: blobUrl ? "vercel-blob" : "unavailable" }, { status: 201 });
 }
