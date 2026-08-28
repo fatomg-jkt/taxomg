@@ -1,6 +1,4 @@
-import { get } from "@vercel/blob";
-
-export const metadataPathname = "documents-pdf.json";
+import { listDocumentMetadata } from "@/lib/supabase-storage-rest";
 
 export type UploadedPdfDocument = {
   id: string;
@@ -13,48 +11,16 @@ export type UploadedPdfDocument = {
   url: string;
 };
 
-type DocumentsPayload = { documents?: Partial<UploadedPdfDocument>[] };
-
-export function blobOptions() {
-  return { token: process.env.BLOB_READ_WRITE_TOKEN };
-}
-
-export function hasBlobConfig() {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
-}
-
-export function readMetadata(): Promise<UploadedPdfDocument[]> {
-  return readPrivateMetadata();
-}
-
-async function readPrivateMetadata(): Promise<UploadedPdfDocument[]> {
-  const result = await get(metadataPathname, { access: "private", ...blobOptions() });
-  if (result?.statusCode !== 200 || !result.stream) return [];
-
-  const text = await new Response(result.stream).text();
-  if (!text.trim()) return [];
-
-  const payload = JSON.parse(text) as DocumentsPayload;
-  return normalizeDocuments(payload);
-}
-
-function normalizeDocuments(payload: DocumentsPayload): UploadedPdfDocument[] {
-  return Array.isArray(payload.documents)
-    ? payload.documents.flatMap((doc) => {
-        if (!doc?.id) return [];
-        const originalName = doc.originalName || doc.name;
-        const pathname = doc.pathname;
-        if (!originalName || !pathname) return [];
-        return [{
-          id: doc.id,
-          originalName,
-          name: doc.name || originalName,
-          pathname,
-          uploadedAt: doc.uploadedAt || "",
-          size: Number(doc.size || 0),
-          type: doc.type || "application/pdf",
-          url: doc.url || "",
-        }];
-      })
-    : [];
+export async function readMetadata(): Promise<UploadedPdfDocument[]> {
+  const rows = await listDocumentMetadata("tax", "tax-document");
+  return rows.map((row) => ({
+    id: row.id,
+    originalName: row.original_filename,
+    name: row.original_filename,
+    pathname: row.storage_path,
+    uploadedAt: row.created_at,
+    size: Number(row.size_bytes ?? 0),
+    type: row.mime_type || "application/pdf",
+    url: `/api/tax-documents/${row.id}`,
+  }));
 }
