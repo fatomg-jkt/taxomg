@@ -64,6 +64,11 @@ function normalizeText(value: string | null | undefined) {
 }
 
 function currentTaxPage(): TaxTemplatePage | null {
+  const pageParam = new URLSearchParams(window.location.search).get("page");
+  if (pageParam === "ppn" || pageParam === "pph21" || pageParam === "unifikasi" || pageParam === "pb1" || pageParam === "umkm") {
+    return pageParam;
+  }
+
   const title = normalizeText(document.querySelector("main h1")?.textContent);
   if (title === "PPN") return "ppn";
   if (title === "PPH PASAL 21") return "pph21";
@@ -108,6 +113,7 @@ function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
   const spec = TEMPLATE_SPECS[page];
   const wrapper = document.createElement("div");
   wrapper.dataset.taxExcelActions = "true";
+  wrapper.dataset.taxExcelPage = page;
   wrapper.className = "relative flex-1 sm:flex-none";
 
   const trigger = document.createElement("button");
@@ -191,6 +197,11 @@ export function TaxExcelActionsEnhancement() {
         if (!page) {
           restore();
           return;
+        }
+
+        const existingWrapper = document.querySelector<HTMLElement>("[data-tax-excel-actions='true']");
+        if (existingWrapper && existingWrapper.dataset.taxExcelPage !== page) {
+          restore();
         }
 
         for (const button of Array.from(document.querySelectorAll<HTMLButtonElement>("main button"))) {
