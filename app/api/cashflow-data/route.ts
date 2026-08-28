@@ -1,30 +1,57 @@
-import { get, put } from "@vercel/blob";
+import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
+import { readDashboardState, writeDashboardState } from "@/lib/supabase-dashboard-state";
 
 const fileName = "cashflow-data.json";
-const empty = { cashflowData: { projection: [], actual: [], bankMutation: [], paymentRequests: [], lastUpdated: null }, updatedAt: null };
+const stateKey = "cashflow-data";
+const empty = { cashflowData: { projection: [], actual: [], bankMutation: [], paymentRequests: [], lastUpdated: null as string | null }, updatedAt: null as string | null };
+const headers = { "Cache-Control": "no-store" };
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const storeId = process.env.TAXOMG_STORE_ID;
-  if (!storeId) return NextResponse.json(empty, { headers: { "Cache-Control": "no-store" } });
   try {
-    const result = await get(fileName, { access: "private", storeId });
-    if (result?.statusCode !== 200 || !result.stream) return NextResponse.json(empty);
-    const payload = JSON.parse(await new Response(result.stream).text());
-    return NextResponse.json({ ...empty, ...payload }, { headers: { "Cache-Control": "no-store" } });
-  } catch { return NextResponse.json(empty, { headers: { "Cache-Control": "no-store" } }); }
+    return NextResponse.json(await readDashboardState(stateKey, empty), { headers });
+  } catch (error) {
+    console.error("[cashflow-data] Supabase read failed", error);
+    return NextResponse.json({ error: "Gagal membaca data cashflow dari Supabase." }, { status: 500, headers });
+  }
 }
 
 export async function POST(request: Request) {
   const password = process.env.DASHBOARD_EDIT_PASSWORD;
   if (!password || request.headers.get("x-dashboard-password") !== password) return NextResponse.json({ error: "Invalid password" }, { status: 401 });
-  const storeId = process.env.TAXOMG_STORE_ID;
-  if (!storeId) return NextResponse.json({ error: "Missing TAXOMG_STORE_ID" }, { status: 500 });
-  const payload = await request.json().catch(() => ({}));
-  const input = payload.cashflowData ?? {};
-  const updatedAt = new Date().toISOString();
-  const cashflowData = { projection: Array.isArray(input.projection) ? input.projection : [], actual: Array.isArray(input.actual) ? input.actual : [], bankMutation: Array.isArray(input.bankMutation) ? input.bankMutation : [], paymentRequests: Array.isArray(input.paymentRequests) ? input.paymentRequests : [], lastUpdated: updatedAt };
-  const blob = await put(fileName, JSON.stringify({ cashflowData, updatedAt }, null, 2), { access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: true, storeId });
-  return NextResponse.json({ ok: true, updatedAt, url: blob.url });
+
+  const body = await request.json().catch(() => ({}));
+  const input = body.cashflowData ?? {};
+  const now = new Date().toISOString();
+  const payload = {
+    cashflowData: {
+      projection: Array.isArray(input.projection) ? input.projection : [],
+      actual: Array.isArray(input.actual) ? input.actual : [],
+      bankMutation: Array.isArray(input.bankMutation) ? input.bankMutation : [],
+      paymentRequests: Array.isArray(input.paymentRequests) ? input.paymentRequests : [],
+      lastUpdated: now,
+    },
+    updatedAt: now,
+  };
+
+  try {
+    payload.updatedAt = await writeDashboardState(stateKey, payload);
+    payload.cashflowData.lastUpdated = payload.updatedAt;
+  } catch (error) {
+    console.error("[cashflow-data] Supabase write failed", error);
+    return NextResponse.json({ error: "Gagal menyimpan data cashflow ke Supabase." }, { status: 500 });
+  }
+
+  let blobUrl: string | undefined;
+  try {
+    if (process.env.TAXOMG_STORE_ID) {
+      const blob = await put(fileName, JSON.stringify(payload, null, 2), { access: "private", contentType: "application/json", addRandomSuffix: false, allowOverwrite: true, storeId: process.env.TAXOMG_STORE_ID });
+      blobUrl = blob.url;
+    }
+  } catch (error) {
+    console.warn("[cashflow-data] Blob backup failed; Supabase data is already safe", error);
+  }
+
+  return NextResponse.json({ ok: true, updatedAt: payload.updatedAt, primaryStorage: "supabase", backupStorage: blobUrl ? "vercel-blob" : "unavailable", url: blobUrl });
 }
