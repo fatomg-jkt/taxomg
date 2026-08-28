@@ -105,6 +105,7 @@ function isManualCreateButton(button: HTMLButtonElement) {
 }
 
 function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
+  const spec = TEMPLATE_SPECS[page];
   const wrapper = document.createElement("div");
   wrapper.dataset.taxExcelActions = "true";
   wrapper.className = "relative flex-1 sm:flex-none";
@@ -119,21 +120,21 @@ function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
 
   const menu = document.createElement("div");
   menu.setAttribute("role", "menu");
-  menu.className = "absolute right-0 z-50 mt-2 hidden min-w-[230px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl";
+  menu.className = "absolute right-0 z-50 mt-2 hidden min-w-[250px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl";
 
   const uploadItem = document.createElement("button");
   uploadItem.type = "button";
   uploadItem.dataset.taxExcelGenerated = "true";
   uploadItem.setAttribute("role", "menuitem");
   uploadItem.className = "flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-100";
-  uploadItem.textContent = "Upload Excel";
+  uploadItem.textContent = `Upload Excel ${spec.title}`;
 
   const downloadItem = document.createElement("button");
   downloadItem.type = "button";
   downloadItem.dataset.taxExcelGenerated = "true";
   downloadItem.setAttribute("role", "menuitem");
   downloadItem.className = "flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-100";
-  downloadItem.textContent = "Download Template Excel";
+  downloadItem.textContent = `Download Template ${spec.title}`;
 
   const setOpen = (open: boolean) => {
     trigger.setAttribute("aria-expanded", String(open));
