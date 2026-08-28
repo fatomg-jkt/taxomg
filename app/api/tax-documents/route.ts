@@ -1,13 +1,9 @@
-import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
-import { isOneDriveConfigured, oneDrivePathname, sanitizeOneDriveFileName, uploadFileToOneDrive } from "@/lib/onedrive-storage";
-import { blobOptions, hasBlobConfig, metadataPathname, readMetadata, type UploadedPdfDocument } from "./shared";
+import { insertDocumentMetadata, uploadStorageObject } from "@/lib/supabase-storage-rest";
+import { readMetadata, type UploadedPdfDocument } from "./shared";
 
 const noStoreHeaders = { "Cache-Control": "no-store" };
-const prefix = "tax-documents/";
-const privateStoreMismatchMessage = "Konfigurasi akses Vercel Blob tidak sesuai. Store saat ini private.";
-const missingTokenMessage = "BLOB_READ_WRITE_TOKEN belum tersedia di Vercel Environment Variables.";
-
+const bucket = "tax-documents";
 export const dynamic = "force-dynamic";
 
 function sanitizeFileName(name: string) {
@@ -19,40 +15,16 @@ function isPdfFile(file: File) {
   return file.type === "application/pdf" || (!file.type && lowerName.endsWith(".pdf"));
 }
 
-function isPrivateStoreMismatch(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes("cannot use public access on a private store") || message.toLowerCase().includes("private store");
-}
-
-async function writeMetadata(documents: UploadedPdfDocument[]) {
-  const body = JSON.stringify({ documents, updatedAt: new Date().toISOString() }, null, 2);
-  return put(metadataPathname, body, {
-    access: "private",
-    contentType: "application/json",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    ...blobOptions(),
-  });
-}
-
 export async function GET() {
-  if (!hasBlobConfig()) return NextResponse.json({ documents: [] }, { headers: noStoreHeaders });
-
   try {
-    const documents = await readMetadata();
-    return NextResponse.json({ documents }, { headers: noStoreHeaders });
+    return NextResponse.json({ documents: await readMetadata() }, { headers: noStoreHeaders });
   } catch (error) {
-    console.error("[tax-documents] Failed to read PDF metadata", error);
-    return NextResponse.json({ documents: [] }, { headers: noStoreHeaders });
+    console.error("[tax-documents] Supabase metadata read failed", error);
+    return NextResponse.json({ ok: false, error: "Gagal membaca dokumen pajak dari Supabase." }, { status: 500, headers: noStoreHeaders });
   }
 }
 
 export async function POST(request: Request) {
-  if (!hasBlobConfig()) {
-    console.error("[tax-documents] Missing BLOB_READ_WRITE_TOKEN on the server.");
-    return NextResponse.json({ ok: false, error: missingTokenMessage }, { status: 500 });
-  }
-
   const formData = await request.formData().catch((error) => {
     console.error("[tax-documents] Failed to parse multipart form data", error);
     return null;
@@ -61,54 +33,34 @@ export async function POST(request: Request) {
   if (!(file instanceof File)) return NextResponse.json({ ok: false, error: "File PDF wajib dipilih." }, { status: 400 });
   if (!isPdfFile(file)) return NextResponse.json({ ok: false, error: "File harus berformat PDF." }, { status: 400 });
 
-  const uploadedAt = new Date().toISOString();
-  const id = `pdf-${crypto.randomUUID()}`;
   const originalName = sanitizeFileName(file.name);
-  let pathname = "";
-  let fileUrl = "";
-  let storage: "onedrive" | "vercel-blob" = "vercel-blob";
+  const storagePath = `${new Date().getFullYear()}/${crypto.randomUUID()}-${originalName}`;
 
   try {
-    if (isOneDriveConfigured()) {
-      const oneDriveFile = new File([await file.arrayBuffer()], sanitizeOneDriveFileName(originalName), { type: file.type || "application/pdf" });
-      const item = await uploadFileToOneDrive(oneDriveFile, "Tax/Dokumen Pajak");
-      pathname = oneDrivePathname(item.id);
-      fileUrl = item.webUrl || "";
-      storage = "onedrive";
-    } else {
-      pathname = `${prefix}${id}-${originalName}`;
-      const blob = await put(pathname, file, {
-        access: "private",
-        contentType: "application/pdf",
-        addRandomSuffix: false,
-        allowOverwrite: false,
-        ...blobOptions(),
-      });
-      fileUrl = blob.url;
-    }
+    await uploadStorageObject(bucket, storagePath, file);
+    const row = await insertDocumentMetadata({
+      module: "tax",
+      category: "tax-document",
+      original_filename: originalName,
+      storage_bucket: bucket,
+      storage_path: storagePath,
+      mime_type: file.type || "application/pdf",
+      size_bytes: file.size,
+      metadata: {},
+    });
+    const document: UploadedPdfDocument = {
+      id: row.id,
+      originalName: row.original_filename,
+      name: row.original_filename,
+      pathname: row.storage_path,
+      uploadedAt: row.created_at,
+      size: Number(row.size_bytes ?? 0),
+      type: row.mime_type || "application/pdf",
+      url: `/api/tax-documents/${row.id}`,
+    };
+    return NextResponse.json({ ok: true, document, storage: "supabase" }, { status: 201 });
   } catch (error) {
-    console.error("[tax-documents] Failed to upload PDF", { file: originalName, error });
-    return NextResponse.json({ ok: false, error: isPrivateStoreMismatch(error) ? privateStoreMismatchMessage : "Gagal upload dokumen." }, { status: 500 });
+    console.error("[tax-documents] Supabase upload failed", error);
+    return NextResponse.json({ ok: false, error: "Gagal upload dokumen pajak ke Supabase." }, { status: 500 });
   }
-
-  const document: UploadedPdfDocument = {
-    id,
-    originalName,
-    name: originalName,
-    pathname,
-    uploadedAt,
-    size: file.size,
-    type: file.type || "application/pdf",
-    url: fileUrl,
-  };
-
-  try {
-    const documents = await readMetadata();
-    await writeMetadata([document, ...documents]);
-  } catch (error) {
-    console.error("[tax-documents] Failed to save PDF metadata", { document, error });
-    return NextResponse.json({ ok: false, error: isPrivateStoreMismatch(error) ? privateStoreMismatchMessage : "Gagal menyimpan metadata dokumen." }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true, document, storage }, { status: 201 });
 }
