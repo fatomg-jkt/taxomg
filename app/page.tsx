@@ -3,6 +3,7 @@ import { CashflowRollingTableStructureEnhancement } from "@/components/cashflow-
 import { CashflowSummaryStructureEnhancement } from "@/components/cashflow-summary-structure-enhancement";
 import { CashflowWorkbookEnhancement } from "@/components/cashflow-workbook-enhancement";
 import { DashboardAuth } from "@/components/dashboard-auth";
+import { FinanceControlVisualEnhancement } from "@/components/finance-control-visual-enhancement";
 import { LoginCopyEnhancement } from "@/components/login-copy-enhancement";
 import { PaymentRequestEnhancement } from "@/components/payment-request-enhancement";
 import { SidebarDashboardAccordion } from "@/components/sidebar-dashboard-accordion";
@@ -11,5 +12,5 @@ import { UserAccessSettingsOverlay } from "@/components/user-access-settings-ove
 import { UserIdInputEnhancement } from "@/components/user-id-input-enhancement";
 
 export default function Home() {
-  return <><DashboardAuth /><LoginCopyEnhancement /><UserIdInputEnhancement /><SidebarDashboardAccordion /><TaxExcelActionsEnhancement /><CashflowEditorEnhancements /><CashflowWorkbookEnhancement /><CashflowSummaryStructureEnhancement /><CashflowRollingTableStructureEnhancement /><PaymentRequestEnhancement /><UserAccessSettingsOverlay /></>;
+  return <><DashboardAuth /><FinanceControlVisualEnhancement /><LoginCopyEnhancement /><UserIdInputEnhancement /><SidebarDashboardAccordion /><TaxExcelActionsEnhancement /><CashflowEditorEnhancements /><CashflowWorkbookEnhancement /><CashflowSummaryStructureEnhancement /><CashflowRollingTableStructureEnhancement /><PaymentRequestEnhancement /><UserAccessSettingsOverlay /></>;
 }
