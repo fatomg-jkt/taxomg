@@ -48,9 +48,71 @@ function applySidebarLogoRemoval() {
 
   const brandingWrapper = aside.querySelector<HTMLElement>("div.relative.mb-5.flex.justify-center");
   if (brandingWrapper) {
-    brandingWrapper.style.setProperty("min-height", "0", "important");
-    brandingWrapper.style.setProperty("margin-bottom", "0", "important");
-    brandingWrapper.style.setProperty("padding", "0", "important");
+    brandingWrapper.style.setProperty("display", "none", "important");
+  }
+}
+
+function applySidebarIdentity() {
+  const aside = document.querySelector<HTMLElement>("main > aside");
+  const nav = aside?.querySelector<HTMLElement>("nav");
+  if (!aside || !nav) return;
+
+  let identity = aside.querySelector<HTMLElement>("[data-sidebar-identity='true']");
+  if (!identity) {
+    identity = document.createElement("div");
+    identity.dataset.sidebarIdentity = "true";
+    identity.innerHTML = `
+      <p data-sidebar-eyebrow>INTERNAL MANAGEMENT SYSTEM</p>
+      <div data-sidebar-rule></div>
+      <h2 data-sidebar-title>Dashboard<br />Finance, Tax &amp; Legal</h2>
+      <p data-sidebar-office>Kantor Kencana</p>
+    `;
+    aside.insertBefore(identity, nav);
+  }
+
+  identity.style.setProperty("margin", "0 0 2rem", "important");
+  identity.style.setProperty("padding", "0.1rem 0.35rem 1.75rem", "important");
+  identity.style.setProperty("border-bottom", "1px solid rgba(246,243,238,0.16)", "important");
+  identity.style.setProperty("color", "#F6F3EE", "important");
+  identity.style.setProperty("text-align", "left", "important");
+
+  const eyebrow = identity.querySelector<HTMLElement>("[data-sidebar-eyebrow]");
+  if (eyebrow) {
+    eyebrow.style.setProperty("margin", "0", "important");
+    eyebrow.style.setProperty("font-family", "var(--mp-font-mono, 'DM Mono', monospace)", "important");
+    eyebrow.style.setProperty("font-size", "0.62rem", "important");
+    eyebrow.style.setProperty("font-weight", "500", "important");
+    eyebrow.style.setProperty("line-height", "1.4", "important");
+    eyebrow.style.setProperty("letter-spacing", "0.18em", "important");
+    eyebrow.style.setProperty("color", "#DCE9F2", "important");
+  }
+
+  const rule = identity.querySelector<HTMLElement>("[data-sidebar-rule]");
+  if (rule) {
+    rule.style.setProperty("height", "1px", "important");
+    rule.style.setProperty("margin", "0.9rem 0 1.3rem", "important");
+    rule.style.setProperty("background", "rgba(246,243,238,0.16)", "important");
+  }
+
+  const title = identity.querySelector<HTMLElement>("[data-sidebar-title]");
+  if (title) {
+    title.style.setProperty("margin", "0", "important");
+    title.style.setProperty("font-family", "var(--mp-font-text, Archivo, sans-serif)", "important");
+    title.style.setProperty("font-size", "1.45rem", "important");
+    title.style.setProperty("font-weight", "700", "important");
+    title.style.setProperty("line-height", "1.08", "important");
+    title.style.setProperty("letter-spacing", "-0.035em", "important");
+    title.style.setProperty("color", "#F6F3EE", "important");
+  }
+
+  const office = identity.querySelector<HTMLElement>("[data-sidebar-office]");
+  if (office) {
+    office.style.setProperty("margin", "0.85rem 0 0", "important");
+    office.style.setProperty("font-family", "var(--mp-font-text, Archivo, sans-serif)", "important");
+    office.style.setProperty("font-size", "0.92rem", "important");
+    office.style.setProperty("font-weight", "700", "important");
+    office.style.setProperty("line-height", "1.3", "important");
+    office.style.setProperty("color", "#F6F3EE", "important");
   }
 }
 
@@ -154,6 +216,7 @@ export function FinanceControlVisualEnhancement() {
       applying = true;
       try {
         applySidebarLogoRemoval();
+        applySidebarIdentity();
         applyFinanceBrandCards();
         applyControlOmzetColumns();
       } finally {
