@@ -20,14 +20,24 @@
   --mp-font-mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
-/* Ground: warm bone, no decorative gradients. */
+/* Ground: one consistent warm cream surface across dashboard content. */
 html,
 body,
-.dashboard-grid {
+.dashboard-grid,
+main,
+main > div,
+main > div > section,
+main > div > header {
   background: var(--mp-bone) !important;
   background-color: var(--mp-bone) !important;
   background-image: none !important;
   color: var(--mp-ink) !important;
+}
+
+/* Keep the sidebar as the stable dark Ink surface. */
+main > aside,
+main > aside * {
+  background-color: initial;
 }
 
 body,
