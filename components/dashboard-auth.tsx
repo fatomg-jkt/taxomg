@@ -107,42 +107,65 @@ export function DashboardAuth() {
     setSession(null);
   }
 
-  if (!ready) return <main className="min-h-screen bg-[#EEF3F8]" aria-label="Memuat sesi" />;
+  if (!ready) return <main className="min-h-screen bg-masterplan-bone" aria-label="Memuat sesi" />;
   if (session) return <TaxCoordinatorDashboard user={session} onLogout={logout} />;
 
-  return <main className="dashboard-grid grid min-h-screen place-items-center bg-[#EEF3F8] p-4">
-    <section className="w-full max-w-md rounded-[2rem] border border-white/80 bg-white p-7 shadow-2xl shadow-slate-300/50 sm:p-9">
-      <div className="mb-8 flex items-center gap-4">
-        <div><h1 className="text-2xl font-black tracking-tight text-slate-950">DASHBOARD</h1><p className="text-sm font-semibold text-slate-500">Finance, Tax &amp; Legal</p></div>
-      </div>
-      <div className="mb-6"><h2 className="text-xl font-black text-slate-950">LOGIN</h2><p className="mt-2 text-sm leading-6 text-slate-600">Gunakan user yang telah didaftarkan oleh administrator.</p></div>
-      <form onSubmit={login} noValidate className="space-y-5">
+  return (
+    <main className="grid min-h-screen bg-masterplan-bone text-masterplan-ink lg:grid-cols-[minmax(0,1.05fr)_minmax(420px,0.95fr)]">
+      <section className="hidden min-h-screen bg-masterplan-ink p-16 text-masterplan-bone lg:flex lg:flex-col lg:justify-between">
         <div>
-          <label htmlFor="email" className="mb-2 block text-sm font-bold text-slate-700">User Id</label>
-          <Input
-            id="email"
-            name="username"
-            type="text"
-            autoComplete="username"
-            autoCapitalize="none"
-            spellCheck={false}
-            autoFocus
-            value={userId}
-            onChange={(event) => { setUserId(normalizeEmail(event.target.value)); setError(""); }}
-            placeholder="user"
-            className="h-12 rounded-2xl bg-white"
-          />
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-masterplan-pale/70">Internal Management System</p>
+          <div className="mt-8 h-px w-full bg-masterplan-bone/20" />
         </div>
-        <div>
-          <label htmlFor="password" className="mb-2 block text-sm font-bold text-slate-700">Password</label>
-          <div className="relative">
-            <Input id="password" type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(event) => { setPassword(event.target.value); setError(""); }} placeholder="password" className="h-12 rounded-2xl bg-white pr-12" />
-            <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"} className="absolute inset-y-0 right-0 grid w-12 place-items-center text-slate-500 hover:text-slate-800">{showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}</button>
+        <div className="max-w-xl">
+          <h1 className="text-6xl font-bold leading-[0.96] tracking-[-0.04em] text-masterplan-bone">Dashboard<br />Finance, Tax &amp; Legal</h1>
+          <p className="mt-8 text-xl font-medium text-masterplan-pale">Kantor Kencana</p>
+        </div>
+        <p className="font-mono text-xs uppercase tracking-[0.16em] text-masterplan-pale/60">Secure access · 2026</p>
+      </section>
+
+      <section className="flex min-h-screen items-center px-6 py-12 sm:px-12 lg:px-16">
+        <div className="w-full max-w-md">
+          <div className="border-b border-masterplan-ink/15 pb-8 lg:hidden">
+            <p className="font-mono text-xs uppercase tracking-[0.16em] text-masterplan-plum">Dashboard</p>
+            <h1 className="mt-3 text-3xl font-bold tracking-[-0.03em]">Finance, Tax &amp; Legal</h1>
+            <p className="mt-2 text-sm text-masterplan-ink/60">Kantor Kencana</p>
           </div>
+
+          <div className="mt-10 border-t border-masterplan-ink pt-6 lg:mt-0">
+            <p className="font-mono text-xs uppercase tracking-[0.16em] text-masterplan-plum">Access / Login</p>
+            <h2 className="mt-4 text-3xl font-bold tracking-[-0.03em]">Masuk ke dashboard</h2>
+            <p className="mt-3 text-sm leading-6 text-masterplan-ink/60">Gunakan user yang telah didaftarkan oleh administrator.</p>
+          </div>
+
+          <form onSubmit={login} noValidate className="mt-8 space-y-6">
+            <div>
+              <label htmlFor="email" className="mb-2 block font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-masterplan-plum">User Id</label>
+              <Input
+                id="email"
+                name="username"
+                type="text"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoFocus
+                value={userId}
+                onChange={(event) => { setUserId(normalizeEmail(event.target.value)); setError(""); }}
+                placeholder="user"
+              />
+            </div>
+            <div>
+              <label htmlFor="password" className="mb-2 block font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-masterplan-plum">Password</label>
+              <div className="relative">
+                <Input id="password" type={showPassword ? "text" : "password"} autoComplete="current-password" value={password} onChange={(event) => { setPassword(event.target.value); setError(""); }} placeholder="password" className="pr-12" />
+                <button type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Sembunyikan password" : "Tampilkan password"} className="absolute inset-y-0 right-0 grid w-12 place-items-center rounded-xl text-masterplan-ink/50 hover:bg-masterplan-ink/5 hover:text-masterplan-ink">{showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}</button>
+              </div>
+            </div>
+            {error && <p role="alert" className="border-l-4 border-masterplan-magenta py-2 pl-4 text-sm font-semibold text-masterplan-ink">{error}</p>}
+            <Button type="submit" disabled={loggingIn} className="w-full sm:w-auto"><LogIn className="h-5 w-5" /> {loggingIn ? "Memproses..." : "Masuk"}</Button>
+          </form>
         </div>
-        {error && <p role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p>}
-        <Button type="submit" disabled={loggingIn} className="h-12 w-full rounded-2xl bg-blue-600 text-base font-bold hover:bg-blue-700 disabled:opacity-60"><LogIn className="h-5 w-5" /> {loggingIn ? "Memproses..." : "Masuk"}</Button>
-      </form>
-    </section>
-  </main>;
+      </section>
+    </main>
+  );
 }
