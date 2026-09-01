@@ -18,11 +18,11 @@ const BRAND_COLORS: Record<string, { background: string; text: string }> = {
   "RESTO": { background: "#059669", text: "#FFFFFF" },
 };
 
-const CONTROL_GROUP_COLORS: Record<string, { strong: string; entity: string; sub: string; body: string; text: string }> = {
-  "1001": { strong: "#DB2777", entity: "#FCE7F3", sub: "#FDF2F8", body: "#FFF5FA", text: "#831843" },
-  "OBSIDIAN": { strong: "#2563EB", entity: "#DBEAFE", sub: "#EFF6FF", body: "#F7FAFF", text: "#1E3A8A" },
-  "RESTO": { strong: "#15803D", entity: "#BBF7D0", sub: "#DCFCE7", body: "#F4FFF7", text: "#14532D" },
-  "MANAGEMENT": { strong: "#7E22CE", entity: "#E9D5FF", sub: "#F3E8FF", body: "#FBF7FF", text: "#581C87" },
+const CONTROL_OMZET_TONE = {
+  background: "#F6F3EE",
+  text: "#101011",
+  label: "#4F2958",
+  border: "#DCD8D1",
 };
 
 function normalize(value: string | null | undefined) {
@@ -150,56 +150,42 @@ function applyFinanceBrandCards() {
 function applyControlOmzetColumns() {
   const tables = Array.from(document.querySelectorAll<HTMLTableElement>("main table.w-max.min-w-full.border-separate"));
   for (const table of tables) {
+    table.style.setProperty("background", CONTROL_OMZET_TONE.background, "important");
+    table.style.setProperty("background-color", CONTROL_OMZET_TONE.background, "important");
+    table.style.setProperty("color", CONTROL_OMZET_TONE.text, "important");
+
+    const wrapper = table.parentElement;
+    if (wrapper) {
+      wrapper.style.setProperty("background", CONTROL_OMZET_TONE.background, "important");
+      wrapper.style.setProperty("background-color", CONTROL_OMZET_TONE.background, "important");
+    }
+
     const headerRows = Array.from(table.tHead?.rows || []);
-    if (!headerRows.length) continue;
-
-    const firstRow = headerRows[0];
-    const groupHeaders = Array.from(firstRow.cells).slice(1);
-    const columnGroups: string[] = [];
-
-    for (const header of groupHeaders) {
-      const groupName = normalize(header.textContent);
-      const palette = CONTROL_GROUP_COLORS[groupName];
-      const span = Math.max(1, header.colSpan || 1);
-      for (let index = 0; index < span; index += 1) columnGroups.push(groupName);
-      if (!palette) continue;
-      header.style.setProperty("background", palette.strong, "important");
-      header.style.setProperty("background-color", palette.strong, "important");
-      header.style.setProperty("color", "#FFFFFF", "important");
-    }
-
-    for (let rowIndex = 1; rowIndex < headerRows.length; rowIndex += 1) {
-      let logicalColumn = 0;
-      for (const header of Array.from(headerRows[rowIndex].cells)) {
-        const groupName = columnGroups[logicalColumn];
-        const palette = CONTROL_GROUP_COLORS[groupName];
-        const span = Math.max(1, header.colSpan || 1);
-        if (palette) {
-          const background = rowIndex === 1 ? palette.entity : palette.sub;
-          header.style.setProperty("background", background, "important");
-          header.style.setProperty("background-color", background, "important");
-          header.style.setProperty("color", palette.text, "important");
-        }
-        logicalColumn += span;
-      }
-    }
+    headerRows.forEach((row, rowIndex) => {
+      Array.from(row.cells).forEach((cell) => {
+        cell.style.setProperty("background", CONTROL_OMZET_TONE.background, "important");
+        cell.style.setProperty("background-color", CONTROL_OMZET_TONE.background, "important");
+        cell.style.setProperty("color", rowIndex === 0 ? CONTROL_OMZET_TONE.label : CONTROL_OMZET_TONE.text, "important");
+        cell.style.setProperty("border-color", CONTROL_OMZET_TONE.border, "important");
+        cell.style.setProperty("box-shadow", "none", "important");
+      });
+    });
 
     for (const row of Array.from(table.tBodies).flatMap((body) => Array.from(body.rows))) {
       const label = normalize(row.cells[0]?.textContent);
-      const dataCells = Array.from(row.cells).slice(1);
-      dataCells.forEach((cell, index) => {
-        const groupName = columnGroups[index];
-        const palette = CONTROL_GROUP_COLORS[groupName];
-        if (!palette) return;
+      Array.from(row.cells).forEach((cell, cellIndex) => {
+        cell.style.setProperty("background", CONTROL_OMZET_TONE.background, "important");
+        cell.style.setProperty("background-color", CONTROL_OMZET_TONE.background, "important");
+        cell.style.setProperty("color", CONTROL_OMZET_TONE.text, "important");
+        cell.style.setProperty("border-color", CONTROL_OMZET_TONE.border, "important");
+        cell.style.setProperty("box-shadow", "none", "important");
 
+        if (cellIndex === 0) {
+          cell.style.setProperty("font-weight", "700", "important");
+        }
         if (label === "TOTAL") {
-          cell.style.setProperty("background", palette.strong, "important");
-          cell.style.setProperty("background-color", palette.strong, "important");
-          cell.style.setProperty("color", "#FFFFFF", "important");
-        } else {
-          cell.style.setProperty("background", palette.body, "important");
-          cell.style.setProperty("background-color", palette.body, "important");
-          cell.style.setProperty("color", "#101011", "important");
+          cell.style.setProperty("font-weight", "700", "important");
+          cell.style.setProperty("border-top", `1px solid ${CONTROL_OMZET_TONE.text}`, "important");
         }
       });
     }
