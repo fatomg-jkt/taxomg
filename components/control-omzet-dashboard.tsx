@@ -66,7 +66,7 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
   const totalValue = (group: string, entity: string, key: "omzet" | "terlapor") => visibleMonths.reduce((sum, masa) => sum + cellValue(masa, group, entity, key), 0);
   const obsidianEntityValue = (masa: string, entity: string, key: "omzet" | "terlapor") => yearAndGroupRows.filter((row) => samePeriod(row.masa, masa, selectedYear) && row.group === OBSIDIAN_GROUP && row.entity === entity).reduce((sum, row) => sum + safeNumber(row[key]), 0);
   const obsidianUnreportedValue = (masa: string) => obsidianEntityValue(masa, PGO_ENTITY, "omzet") + obsidianEntityValue(masa, STB_ENTITY, "omzet") - obsidianEntityValue(masa, PGO_ENTITY, "terlapor") - obsidianEntityValue(masa, STB_ENTITY, "terlapor");
-  const obsidianUnreportedTotal = () => CONTROL_OMZET_MONTHS.reduce((sum, masa) => sum + obsidianUnreportedValue(masa), 0);
+  const obsidianUnreportedTotal = () => visibleMonths.reduce((sum, masa) => sum + obsidianUnreportedValue(masa), 0);
   const remainingValue = (group: string, entity: string, key: "omzet" | "terlapor") => ANNUAL_OMZET_LIMIT - totalValue(group, entity, key);
   const isObsidianUnreported = (group: string, entity: string) => group === OBSIDIAN_GROUP && entity === OBSIDIAN_UNREPORTED_ENTITY;
   const update = (key: keyof Filters, value: string) => {
@@ -143,16 +143,16 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
           </div>
 
           <div className="overflow-x-auto border border-[#DCD8D1] bg-[#F6F3EE]">
-            <table className="w-max min-w-full border-collapse bg-[#F6F3EE] font-sans text-xs text-[#101011]">
+            <table data-control-omzet-table="true" className="w-max min-w-full border-collapse bg-[#F6F3EE] font-sans text-xs text-[#101011]">
               <thead>
                 <tr>
-                  <th rowSpan={2} className="sticky left-0 z-20 min-w-24 border-b border-r border-[#24358C] bg-[#24358C] px-4 py-3 text-left font-mono text-[11px] uppercase tracking-[0.12em] text-[#F6F3EE]">Masa</th>
-                  {group.entities.map((entity) => <th key={`${group.name}-${entity}`} colSpan={isObsidianUnreported(group.name, entity) ? 1 : 2} rowSpan={isObsidianUnreported(group.name, entity) ? 2 : 1} className={`${isObsidianUnreported(group.name, entity) ? "w-36 min-w-36 max-w-36 whitespace-normal" : "min-w-56"} border-b border-r border-[#24358C] bg-[#4F2958] px-3 py-3 text-center font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-[#F6F3EE]`}>{isObsidianUnreported(group.name, entity) ? <span>Omset Tidak<br />Terlapor<br />PGO + STB</span> : entity}</th>)}
+                  <th rowSpan={2} className="sticky left-0 z-20 min-w-24 border-b border-r border-[#BABD39] bg-[#D5D846] px-4 py-3 text-left font-mono text-[11px] uppercase tracking-[0.12em] text-[#101011]">Masa</th>
+                  {group.entities.map((entity) => <th key={`${group.name}-${entity}`} colSpan={isObsidianUnreported(group.name, entity) ? 1 : 2} rowSpan={isObsidianUnreported(group.name, entity) ? 2 : 1} className={`${isObsidianUnreported(group.name, entity) ? "w-36 min-w-36 max-w-36 whitespace-normal" : "min-w-56"} border-b border-r border-[#BABD39] bg-[#D5D846] px-3 py-3 text-center font-mono text-[11px] font-semibold uppercase tracking-[0.08em] text-[#101011]`}>{isObsidianUnreported(group.name, entity) ? <span>Omset Tidak<br />Terlapor<br />PGO + STB</span> : entity}</th>)}
                 </tr>
                 <tr>
                   {group.entities.flatMap((entity) => isObsidianUnreported(group.name, entity) ? [] : [
-                    <th key={`${entity}-omzet`} className="min-w-32 border-b border-r border-[#C8C3BC] bg-[#DCE9F2] px-3 py-2 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-[#24358C]">Omset</th>,
-                    <th key={`${entity}-terlapor`} className="min-w-32 border-b border-r border-[#C8C3BC] bg-[#DCE9F2] px-3 py-2 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-[#24358C]">Terlapor</th>,
+                    <th key={`${entity}-omzet`} className="min-w-32 border-b border-r border-[#BABD39] bg-[#D5D846] px-3 py-2 text-center font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#101011]">Omset</th>,
+                    <th key={`${entity}-terlapor`} className="min-w-32 border-b border-r border-[#BABD39] bg-[#D5D846] px-3 py-2 text-center font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#101011]">Terlapor</th>,
                   ])}
                 </tr>
               </thead>
@@ -167,27 +167,27 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
                   })}
                 </tr>)}
 
-                <tr className="bg-[#101011] font-bold text-[#F6F3EE]">
+                <tr data-control-total="true" className="bg-[#101011] font-bold text-[#F6F3EE]">
                   <th className="sticky left-0 z-10 border-r border-[#353535] bg-[#101011] px-4 py-3 text-left font-mono text-[11px] uppercase tracking-[0.12em] text-[#F6F3EE]">Total</th>
                   {group.entities.flatMap((entity) => {
                     if (isObsidianUnreported(group.name, entity)) {
-                      return [<td key={`total-${entity}`} className="w-36 min-w-36 max-w-36 border-r border-[#353535] px-3 py-3 text-right tabular-nums">{number(obsidianUnreportedTotal())}</td>];
+                      return [<td key={`total-${entity}`} className="w-36 min-w-36 max-w-36 border-r border-[#353535] bg-[#101011] px-3 py-3 text-right font-bold text-[#F6F3EE] tabular-nums">{number(obsidianUnreportedTotal())}</td>];
                     }
-                    return (["omzet", "terlapor"] as const).map((key) => <td key={`total-${entity}-${key}`} className="border-r border-[#353535] px-3 py-3 text-right tabular-nums">{number(totalValue(group.name, entity, key))}</td>);
+                    return (["omzet", "terlapor"] as const).map((key) => <td key={`total-${entity}-${key}`} className="border-r border-[#353535] bg-[#101011] px-3 py-3 text-right font-bold text-[#F6F3EE] tabular-nums">{number(totalValue(group.name, entity, key))}</td>);
                   })}
                 </tr>
 
-                <tr className="bg-[#D5D846] font-bold text-[#101011]">
+                <tr data-control-sisa="true" className="bg-[#D5D846] font-bold text-[#101011]">
                   <th className="sticky left-0 z-10 border-r border-[#BABD39] bg-[#D5D846] px-4 py-3 text-left font-mono text-[11px] uppercase tracking-[0.12em] text-[#101011]">Sisa</th>
                   {group.entities.flatMap((entity) => {
                     if (isObsidianUnreported(group.name, entity)) {
                       const remaining = ANNUAL_OMZET_LIMIT - obsidianUnreportedTotal();
-                      return [<td key={`sisa-${entity}`} className={`w-36 min-w-36 max-w-36 border-r border-[#BABD39] px-3 py-3 text-right tabular-nums ${remaining < 0 ? "text-[#D6396F]" : ""}`}>{number(remaining)}</td>];
+                      return [<td key={`sisa-${entity}`} className={`w-36 min-w-36 max-w-36 border-r border-[#BABD39] bg-[#D5D846] px-3 py-3 text-right tabular-nums ${remaining < 0 ? "text-[#D6396F]" : "text-[#101011]"}`}>{number(remaining)}</td>];
                     }
-                    if (EMPTY_REMAINING_ENTITIES.has(entity)) return (["omzet", "terlapor"] as const).map((key) => <td key={`sisa-${entity}-${key}`} aria-label={`Sisa ${entity} tidak diperhitungkan`} className="border-r border-[#BABD39] px-3 py-3 text-center text-[#6B6B68]">—</td>);
+                    if (EMPTY_REMAINING_ENTITIES.has(entity)) return (["omzet", "terlapor"] as const).map((key) => <td key={`sisa-${entity}-${key}`} aria-label={`Sisa ${entity} tidak diperhitungkan`} className="border-r border-[#BABD39] bg-[#D5D846] px-3 py-3 text-center text-[#6B6B68]">—</td>);
                     return (["omzet", "terlapor"] as const).map((key) => {
                       const remaining = remainingValue(group.name, entity, key);
-                      return <td key={`sisa-${entity}-${key}`} className={`border-r border-[#BABD39] px-3 py-3 text-right tabular-nums ${remaining < 0 ? "text-[#D6396F]" : ""}`}>{number(remaining)}</td>;
+                      return <td key={`sisa-${entity}-${key}`} className={`border-r border-[#BABD39] bg-[#D5D846] px-3 py-3 text-right tabular-nums ${remaining < 0 ? "text-[#D6396F]" : "text-[#101011]"}`}>{number(remaining)}</td>;
                     });
                   })}
                 </tr>
