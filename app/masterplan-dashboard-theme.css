@@ -310,6 +310,32 @@ main table tbody tr:hover td {
   background: rgba(213, 216, 70, 0.12) !important;
 }
 
+/* Control Omzet: make the table headers use the same Acid surface as Sisa. */
+main table[data-control-omzet-table='true'] thead th {
+  background: var(--mp-acid) !important;
+  background-color: var(--mp-acid) !important;
+  color: var(--mp-ink) !important;
+  border-color: #BABD39 !important;
+}
+
+/* Control Omzet Total stays dark, with its summed values clearly visible. */
+main table[data-control-omzet-table='true'] tbody tr[data-control-total='true'] th,
+main table[data-control-omzet-table='true'] tbody tr[data-control-total='true'] td {
+  background: var(--mp-ink) !important;
+  background-color: var(--mp-ink) !important;
+  color: var(--mp-bone) !important;
+  border-color: #353535 !important;
+}
+
+/* Control Omzet Sisa keeps the same Acid treatment as the header. */
+main table[data-control-omzet-table='true'] tbody tr[data-control-sisa='true'] th,
+main table[data-control-omzet-table='true'] tbody tr[data-control-sisa='true'] td {
+  background: var(--mp-acid) !important;
+  background-color: var(--mp-acid) !important;
+  color: var(--mp-ink) !important;
+  border-color: #BABD39 !important;
+}
+
 /* Status remains dot / type driven; avoid coloured chip surfaces where possible. */
 main [class*='rounded-full'][class*='bg-green-'],
 main [class*='rounded-full'][class*='bg-emerald-'] {
