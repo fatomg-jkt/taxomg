@@ -146,13 +146,13 @@ export function ControlOmzetDashboard({ data, setData, saving, onSave }: { data:
             <table className="w-max min-w-full border-collapse bg-[#F6F3EE] font-sans text-xs text-[#101011]">
               <thead>
                 <tr>
-                  <th rowSpan={2} className="sticky left-0 z-20 min-w-24 border-b border-r border-[#DCD8D1] bg-[#F6F3EE] px-4 py-3 text-left font-mono text-[11px] uppercase tracking-[0.12em] text-[#4F2958]">Masa</th>
-                  {group.entities.map((entity) => <th key={`${group.name}-${entity}`} colSpan={isObsidianUnreported(group.name, entity) ? 1 : 2} rowSpan={isObsidianUnreported(group.name, entity) ? 2 : 1} className={`${isObsidianUnreported(group.name, entity) ? "w-36 min-w-36 max-w-36 whitespace-normal" : "min-w-56"} border-b border-r border-[#DCD8D1] bg-[#F6F3EE] px-3 py-3 text-center font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-[#4F2958]`}>{isObsidianUnreported(group.name, entity) ? <span>Omset Tidak<br />Terlapor<br />PGO + STB</span> : entity}</th>)}
+                  <th rowSpan={2} className="sticky left-0 z-20 min-w-24 border-b border-r border-[#24358C] bg-[#24358C] px-4 py-3 text-left font-mono text-[11px] uppercase tracking-[0.12em] text-[#F6F3EE]">Masa</th>
+                  {group.entities.map((entity) => <th key={`${group.name}-${entity}`} colSpan={isObsidianUnreported(group.name, entity) ? 1 : 2} rowSpan={isObsidianUnreported(group.name, entity) ? 2 : 1} className={`${isObsidianUnreported(group.name, entity) ? "w-36 min-w-36 max-w-36 whitespace-normal" : "min-w-56"} border-b border-r border-[#24358C] bg-[#4F2958] px-3 py-3 text-center font-mono text-[11px] font-medium uppercase tracking-[0.08em] text-[#F6F3EE]`}>{isObsidianUnreported(group.name, entity) ? <span>Omset Tidak<br />Terlapor<br />PGO + STB</span> : entity}</th>)}
                 </tr>
                 <tr>
                   {group.entities.flatMap((entity) => isObsidianUnreported(group.name, entity) ? [] : [
-                    <th key={`${entity}-omzet`} className="min-w-32 border-b border-r border-[#DCD8D1] bg-[#F6F3EE] px-3 py-2 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-[#101011]">Omset</th>,
-                    <th key={`${entity}-terlapor`} className="min-w-32 border-b border-r border-[#DCD8D1] bg-[#F6F3EE] px-3 py-2 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-[#101011]">Terlapor</th>,
+                    <th key={`${entity}-omzet`} className="min-w-32 border-b border-r border-[#C8C3BC] bg-[#DCE9F2] px-3 py-2 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-[#24358C]">Omset</th>,
+                    <th key={`${entity}-terlapor`} className="min-w-32 border-b border-r border-[#C8C3BC] bg-[#DCE9F2] px-3 py-2 text-center font-mono text-[10px] uppercase tracking-[0.12em] text-[#24358C]">Terlapor</th>,
                   ])}
                 </tr>
               </thead>
