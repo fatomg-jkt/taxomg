@@ -124,18 +124,18 @@ export function DashboardAuth() {
         <p className="font-mono text-xs uppercase tracking-[0.16em] text-masterplan-pale/60">Secure access · 2026</p>
       </section>
 
-      <section className="flex min-h-screen items-center px-6 py-12 sm:px-12 lg:px-16">
+      <section className="flex min-h-screen items-center bg-masterplan-bone px-6 py-12 sm:px-12 lg:px-16">
         <div className="w-full max-w-md">
           <div className="border-b border-masterplan-ink/15 pb-8 lg:hidden">
-            <p className="font-mono text-xs uppercase tracking-[0.16em] text-masterplan-plum">Dashboard</p>
-            <h1 className="mt-3 text-3xl font-bold tracking-[-0.03em]">Finance, Tax &amp; Legal</h1>
+            <p className="font-mono text-xs uppercase tracking-[0.16em] text-masterplan-plum">Internal Management System</p>
+            <h1 className="mt-3 text-3xl font-bold leading-tight tracking-[-0.03em]">Selamat Datang di Dashboard Finance, Tax dan Legal</h1>
             <p className="mt-2 text-sm text-masterplan-ink/60">Kantor Kencana</p>
           </div>
 
           <div className="mt-10 border-t border-masterplan-ink pt-6 lg:mt-0">
             <p className="font-mono text-xs uppercase tracking-[0.16em] text-masterplan-plum">Access / Login</p>
-            <h2 className="mt-4 text-3xl font-bold tracking-[-0.03em]">Masuk ke dashboard</h2>
-            <p className="mt-3 text-sm leading-6 text-masterplan-ink/60">Gunakan user yang telah didaftarkan oleh administrator.</p>
+            <h2 className="mt-4 text-3xl font-bold leading-tight tracking-[-0.03em]">Selamat Datang di Dashboard Finance, Tax dan Legal</h2>
+            <p className="mt-3 text-sm leading-6 text-masterplan-ink/60">Kantor Kencana · gunakan user yang telah didaftarkan oleh administrator.</p>
           </div>
 
           <form onSubmit={login} noValidate className="mt-8 space-y-6">
