@@ -109,6 +109,16 @@ function isManualCreateButton(button: HTMLButtonElement) {
   return label === "MANUAL" || label === "+ MANUAL" || label.includes("TAMBAH DATA MANUAL") || label.startsWith("+ TAMBAH DATA PPN") || label.startsWith("+ TAMBAH DATA PPH") || label.startsWith("+ TAMBAH DATA PB");
 }
 
+function findNativeManualButton() {
+  const marked = document.querySelector<HTMLButtonElement>("main button[data-tax-manual-hidden='true']");
+  if (marked) return marked;
+
+  return Array.from(document.querySelectorAll<HTMLButtonElement>("main button")).find((button) => {
+    if (button.dataset.taxExcelGenerated === "true" || button.closest("[data-tax-excel-actions='true']")) return false;
+    return isManualCreateButton(button);
+  }) ?? null;
+}
+
 function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
   const spec = TEMPLATE_SPECS[page];
   const wrapper = document.createElement("div");
@@ -122,25 +132,25 @@ function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
   trigger.className = nativeUpload.className;
   trigger.setAttribute("aria-haspopup", "menu");
   trigger.setAttribute("aria-expanded", "false");
-  trigger.textContent = "Upload Excel  ▾";
+  trigger.textContent = "Tambah Data  ▾";
 
   const menu = document.createElement("div");
   menu.setAttribute("role", "menu");
-  menu.className = "absolute right-0 z-50 mt-2 hidden min-w-[250px] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1.5 shadow-xl";
+  menu.className = "absolute right-0 z-50 mt-2 hidden min-w-[260px] overflow-hidden rounded-xl border border-[#DCD8D1] bg-[#F6F3EE] p-1.5";
 
-  const uploadItem = document.createElement("button");
-  uploadItem.type = "button";
-  uploadItem.dataset.taxExcelGenerated = "true";
-  uploadItem.setAttribute("role", "menuitem");
-  uploadItem.className = "flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-100";
-  uploadItem.textContent = `Upload Excel ${spec.title}`;
+  const createMenuItem = (label: string) => {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.dataset.taxExcelGenerated = "true";
+    item.setAttribute("role", "menuitem");
+    item.className = "flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-bold text-[#101011] hover:bg-[#D5D846]/20";
+    item.textContent = label;
+    return item;
+  };
 
-  const downloadItem = document.createElement("button");
-  downloadItem.type = "button";
-  downloadItem.dataset.taxExcelGenerated = "true";
-  downloadItem.setAttribute("role", "menuitem");
-  downloadItem.className = "flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm font-bold text-slate-700 hover:bg-slate-100";
-  downloadItem.textContent = `Download Template ${spec.title}`;
+  const uploadItem = createMenuItem("Upload Excel");
+  const manualItem = createMenuItem("Tambah Data Manual");
+  const downloadItem = createMenuItem(`Download Template ${spec.title}`);
 
   const setOpen = (open: boolean) => {
     trigger.setAttribute("aria-expanded", String(open));
@@ -160,6 +170,14 @@ function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
     nativeUpload.click();
   });
 
+  manualItem.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setOpen(false);
+    const nativeManual = findNativeManualButton();
+    if (nativeManual) nativeManual.click();
+  });
+
   downloadItem.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
@@ -167,7 +185,7 @@ function makeMenu(nativeUpload: HTMLButtonElement, page: TaxTemplatePage) {
     downloadTemplate(page);
   });
 
-  menu.append(uploadItem, downloadItem);
+  menu.append(uploadItem, manualItem, downloadItem);
   wrapper.append(trigger, menu);
   nativeUpload.insertAdjacentElement("afterend", wrapper);
 }
